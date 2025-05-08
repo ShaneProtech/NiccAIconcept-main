@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NICC - ADAS Calibration Assistant</title>
+    <!-- Add Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Add highlight.js for code syntax highlighting (optional) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Fixed elements that stay in place while scrolling -->
+    <div class="fixed-elements">
+        <h1>NICC</h1>
+        <p class="subtitle">Advanced Driver Assistance Systems Calibration</p>
+        <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+            <i class="fas fa-sun"></i>
+        </button>
+        <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+            <i class="fas fa-bars"></i>
+        </button>
+    </div>
+    
+    <!-- Chat sidebar -->
+    <div class="sidebar" id="chatSidebar">
+        <div class="sidebar-header">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <img src="/static/images/nicc-logo.svg" alt="NICC AI" style="width: 30px; height: 30px;">
+                <h2 style="margin: 0; padding: 0;">Your Conversations</h2>
+            </div>
+            <div class="sidebar-buttons">
+                <button id="newChatBtn" class="new-chat-btn" title="Start a new conversation">
+                    <i class="fas fa-plus"></i><span>New Chat</span>
+                </button>
+                <button id="cleanupChatsBtn" class="cleanup-btn" title="Keep only the 5 most recent conversations">
+                    <i class="fas fa-broom"></i><span>Clean Up</span>
+                </button>
+            </div>
+            <button id="closeSidebarBtn" class="close-sidebar-btn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="chat-list" id="chatList">
+            <!-- Chat list will be populated by JavaScript -->
+            <div class="empty-chats-message">No conversations yet</div>
+        </div>
+    </div>
+    
+    <div class="main-content">
+        <div class="header">
+            <!-- N icon removed -->
+        </div>
+
+        <div class="chat-container">
+            <div id="messages" class="messages-container"></div>
+            <div class="input-container">
+                <input type="text" id="userInput" placeholder="Ask about ADAS calibrations...">
+                <button class="mic-button" id="micButton" title="Click to speak instead of typing">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <button class="send-button" onclick="sendMessage()">
+                    Send
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Vehicle selection panel -->
+        <div class="vehicle-selection-panel" style="max-height: calc(100vh - 150px); overflow-y: auto;">
+            <h3>Vehicle Information</h3>
+            <p>Select vehicle details for NICC to reference:</p>
+            
+            <div class="selector-container">
+                <label for="yearSelect">Year:</label>
+                <select id="yearSelect" class="vehicle-select">
+                    <option value="">Select Year</option>
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+            </div>
+            
+            <div class="selector-container">
+                <label for="makeSelect">Make:</label>
+                <select id="makeSelect" class="vehicle-select">
+                    <option value="">Select Make</option>
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+            </div>
+            
+            <div class="selector-container">
+                <label for="modelSelect">Model:</label>
+                <select id="modelSelect" class="vehicle-select">
+                    <option value="">Select Model</option>
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+            </div>
+            
+            <div class="selector-container">
+                <label for="systemSelect">System:</label>
+                <div id="systemDropdownsContainer" class="system-dropdowns-container">
+                    <div class="system-dropdown-group">
+                        <select id="systemSelect" class="vehicle-select system-select">
+                            <option value="">Select System</option>
+                            <option value="All Systems">All Systems</option>
+                            <!-- Options will be populated by JavaScript -->
+                        </select>
+                    </div>
+                    <!-- Additional system dropdowns will be added here -->
+                </div>
+                <div class="system-controls">
+                    <button id="addSystemBtn" class="add-system-btn" title="Add Another System">
+                        <i class="fas fa-plus"></i> Add System
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Add VIN Decoder Section -->
+            <div class="selector-container vin-section">
+                <label for="vinInput">VIN Decode:</label>
+                <div class="vin-input-container">
+                    <input type="text" id="vinInput" class="vin-input" placeholder="Enter 17-digit VIN" maxlength="17">
+                    <button id="decodeVinBtn" class="decode-vin-btn">
+                        <i class="fas fa-search"></i> Decode
+                    </button>
+                </div>
+                <div id="vinStatus" class="vin-status"></div>
+            </div>
+            
+            <!-- Add POI Diagram Section -->
+            <div class="selector-container poi-section">
+                <label>Point of Impact:</label>
+                <p class="poi-instruction">Select one or more damage areas:</p>
+                <div id="poiDiagram" class="poi-diagram">
+                    <!-- Will be populated with POI markers via JavaScript -->
+                    <img src="/static/images/POISheet.png" alt="Vehicle Diagram" class="vehicle-outline">
+                    <div id="poiMarkers" class="poi-markers">
+                        <!-- POI markers will be added here via JavaScript -->
+                    </div>
+                </div>
+                <div id="selectedPOIs" class="selected-pois">
+                    <p>Selected areas: <span id="poiList">None</span></p>
+                </div>
+            </div>
+            
+            <button id="clearVehicleBtn" class="clear-vehicle-btn">
+                <i class="fas fa-times"></i> Clear Selection
+            </button>
+            
+            <button id="searchVehicleBtn" class="search-vehicle-btn">
+                <i class="fas fa-search"></i> Search
+            </button>
+        </div>
+    </div>
+    
+    <!-- Chat rename dialog -->
+    <div id="renameDialog" class="dialog">
+        <div class="dialog-content">
+            <h3>Rename Conversation</h3>
+            <input type="text" id="newChatName" placeholder="Enter new name">
+            <div class="dialog-buttons">
+                <button id="cancelRename" class="dialog-button cancel">Cancel</button>
+                <button id="confirmRename" class="dialog-button confirm">Rename</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+    <script>
+        const socket = io();
+        const messages = document.getElementById('messages');
+        const userInput = document.getElementById('userInput');
+        
+        // Vehicle selection elements
+        const yearSelect = document.getElementById('yearSelect');
+        const makeSelect = document.getElementById('makeSelect');
+        const modelSelect = document.getElementById('modelSelect');
+        const systemSelect = document.getElementById('systemSelect');
+        const clearVehicleBtn = document.getElementById('clearVehicleBtn');
+        
+        // Current vehicle context
+        let vehicleContext = {
+            year: null,
+            make: null,
+            model: null,
+            systems: [] // Changed from single system to array of systems
+        };
+
+        // Configure marked options
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            tables: true,
+            headerIds: true,
+            renderer: createCustomRenderer(),
+            highlight: function (code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return code;
+            }
+        });
+        
+        // Create a custom renderer to handle links
+        function createCustomRenderer() {
+            const renderer = new marked.Renderer();
+            // Override the link renderer to add target="_blank"
+            renderer.link = function(href, title, text) {
+                const link = marked.Renderer.prototype.link.apply(this, arguments);
+                return link.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
+            };
+            return renderer;
+        }
+
+        function appendMessage(content, isUser = false) {
+            // First clean up the content (for non-user messages)
+            if (!isUser && typeof content === 'string') {
+                // Remove standalone horizontal rules from the beginning of the content
+                content = content.replace(/^\s*[-]{3,}\s*$/m, '');   // Markdown style horizontal rule
+                content = content.replace(/^\s*<hr\s*\/?>\s*$/m, ''); // HTML style horizontal rule
+                
+                // If content is empty or only whitespace after cleaning, don't create a message bubble
+                if (!content.trim()) {
+                    return; // Skip creating an empty message bubble
+                }
+            }
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'assistant-message'}`;
+            
+            if (!isUser) {
+                // Check for HTML content markers
+                const isHTML = content.startsWith('<div class="calibration-results">') || 
+                               content.includes('<table') || 
+                               content.includes('<h2>') ||
+                               content.startsWith('<div');
+                               
+                if (isHTML) {
+                    // Direct HTML content (tables, calibration results)
+                    console.log("Rendering as HTML: ", content.substring(0, 100) + "...");
+                    messageDiv.innerHTML = content;
+                } else {
+                    // Markdown content
+                    messageDiv.classList.add('markdown-content');
+                    messageDiv.innerHTML = marked.parse(content);
+                }
+            } else {
+                messageDiv.textContent = content;
+            }
+            
+            messages.appendChild(messageDiv);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function sendMessage() {
+            const message = userInput.value.trim();
+            if (message) {
+                // Check if a chat is active by looking for a chat_id in localStorage
+                const activeChatId = localStorage.getItem('activeChatId');
+                
+                if (!activeChatId) {
+                    // No active chat, create one first
+                    fetch('/api/chats/new', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Set as active chat
+                            localStorage.setItem('activeChatId', data.chat_id);
+                            // Now send the message
+                            sendMessageToChat(message, data.chat_id);
+                        } else {
+                            appendMessage("Error: Could not create a new chat. Please try again.", false);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error creating new chat:', error);
+                        appendMessage("Error: Could not create a new chat. Please try again.", false);
+                    });
+                } else {
+                    // Chat already exists, send message directly
+                    sendMessageToChat(message, activeChatId);
+                }
+            }
+        }
+        
+        function sendMessageToChat(message, chatId) {
+            appendMessage(message, true);
+            
+            // Show loading indicators before sending message
+            if (window.showResponseLoading) {
+                window.showResponseLoading();
+            }
+            
+            // Include vehicle context with the message
+            socket.emit('message', { 
+                message: message,
+                vehicleContext: vehicleContext,
+                chat_id: chatId
+            });
+            userInput.value = '';
+        }
+
+        socket.on('response', function(data) {
+            // Check if the response contains HTML content
+            const isHTML = data.isHTML || 
+                          data.message.startsWith('<div class="calibration-results">') || 
+                          data.message.includes('<table') || 
+                          data.isMarkdown === false;
+            
+            if (window.hideResponseLoading) {
+                window.hideResponseLoading();
+            }
+            
+            console.log("Received response with isHTML:", isHTML, "isMarkdown:", data.isMarkdown);
+            
+            // Handle the message
+            appendMessage(data.message, false);
+        });
+
+        socket.on('error', function(data) {
+            appendMessage(`Error: ${data.message}`);
+        });
+        
+        // Chat history handling
+        socket.on('chat_history', function(data) {
+            // Clear current messages
+            messages.innerHTML = '';
+            
+            // Add messages from history
+            data.messages.forEach(msg => {
+                appendMessage(msg.content, msg.role === 'user');
+            });
+        });
+        
+        // Handle chat rename events
+        socket.on('chat_renamed', function(data) {
+            console.log('Chat renamed via HTML handler:', data);
+            // Update UI if needed (the JS file should handle this as well)
+            const chatItems = document.querySelectorAll('.chat-item');
+            chatItems.forEach(item => {
+                if (item.dataset.chatId === data.chat_id) {
+                    const nameEl = item.querySelector('.chat-item-name');
+                    if (nameEl) {
+                        console.log(`HTML handler: Updating name from '${nameEl.textContent}' to '${data.new_name}'`);
+                        nameEl.textContent = data.new_name;
+                        nameEl.classList.add('name-updated');
+                        setTimeout(() => nameEl.classList.remove('name-updated'), 2000);
+                    }
+                }
+            });
+        });
+
+        userInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Speech Recognition functionality
+        const micButton = document.getElementById('micButton');
+        let recognition = null;
+        let isRecording = false;
+        let speechTimeout = null;
+        
+        // Check if browser supports speech recognition
+        if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+            // Initialize speech recognition
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+            
+            // Add event listeners for recognition results
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                userInput.value = transcript;
+                stopRecording();
+                
+                // Clear any existing timeout since we got a result
+                if (speechTimeout) {
+                    clearTimeout(speechTimeout);
+                    speechTimeout = null;
+                }
+                
+                // Add a small delay before sending the message to allow the user to see what was transcribed
+                setTimeout(() => {
+                    if (userInput.value.trim() === transcript.trim()) {
+                        sendMessage();
+                    }
+                }, 1500);
+            };
+            
+            // Add audiostart and audioend events to detect silence
+            recognition.onaudiostart = function() {
+                // Set a timeout to stop recording if no speech is detected within 5 seconds
+                if (speechTimeout) {
+                    clearTimeout(speechTimeout);
+                }
+                speechTimeout = setTimeout(() => {
+                    if (isRecording) {
+                        stopRecording();
+                    }
+                }, 5000); // 5-second timeout
+            };
+            
+            recognition.onaudioend = function() {
+                // Clear the timeout when audio ends
+                if (speechTimeout) {
+                    clearTimeout(speechTimeout);
+                    speechTimeout = null;
+                }
+            };
+            
+            recognition.onerror = function(event) {
+                console.error('Speech recognition error:', event.error);
+                stopRecording();
+                
+                // Clear any existing timeout
+                if (speechTimeout) {
+                    clearTimeout(speechTimeout);
+                    speechTimeout = null;
+                }
+            };
+            
+            recognition.onend = function() {
+                stopRecording();
+                
+                // Clear any existing timeout
+                if (speechTimeout) {
+                    clearTimeout(speechTimeout);
+                    speechTimeout = null;
+                }
+            };
+            
+            // Microphone button click event
+            micButton.addEventListener('click', function() {
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            });
+        } else {
+            // Browser doesn't support speech recognition
+            micButton.style.display = 'none';
+            console.log('Speech recognition not supported in this browser');
+            
+            // Add a notification for users in browsers that don't support speech recognition
+            const browserNotSupported = document.createElement('div');
+            browserNotSupported.className = 'browser-notice';
+            browserNotSupported.innerHTML = 'Voice input is not supported in your browser. Please use Chrome, Edge, or Safari for this feature.';
+            
+            // Insert the notice after the header
+            const header = document.querySelector('.header');
+            if (header && header.nextElementSibling) {
+                header.parentNode.insertBefore(browserNotSupported, header.nextElementSibling);
+                
+                // Auto-hide the notice after 5 seconds
+                setTimeout(() => {
+                    browserNotSupported.style.opacity = '0';
+                    setTimeout(() => {
+                        browserNotSupported.remove();
+                    }, 1000);
+                }, 5000);
+            }
+        }
+        
+        function startRecording() {
+            if (recognition) {
+                try {
+                    recognition.start();
+                    isRecording = true;
+                    micButton.classList.add('recording');
+                    userInput.placeholder = 'Listening...';
+                    
+                    // Create or show listening indicator
+                    let listeningIndicator = document.getElementById('listeningIndicator');
+                    if (!listeningIndicator) {
+                        listeningIndicator = document.createElement('div');
+                        listeningIndicator.id = 'listeningIndicator';
+                        listeningIndicator.className = 'listening-indicator';
+                        listeningIndicator.innerHTML = 'Listening <span>.</span><span>.</span><span>.</span>';
+                        document.querySelector('.input-container').appendChild(listeningIndicator);
+                    } else {
+                        listeningIndicator.style.display = 'flex';
+                    }
+                } catch (error) {
+                    console.error('Error starting speech recognition:', error);
+                }
+            }
+        }
+        
+        function stopRecording() {
+            if (recognition) {
+                try {
+                    recognition.stop();
+                } catch (error) {
+                    console.error('Error stopping speech recognition:', error);
+                }
+                isRecording = false;
+                micButton.classList.remove('recording');
+                userInput.placeholder = 'Ask about ADAS calibrations...';
+                
+                // Clear any existing timeout
+                if (speechTimeout) {
+                    clearTimeout(speechTimeout);
+                    speechTimeout = null;
+                }
+                
+                // Hide listening indicator
+                const listeningIndicator = document.getElementById('listeningIndicator');
+                if (listeningIndicator) {
+                    listeningIndicator.style.display = 'none';
+                }
+            }
+        }
+        
+        // Load vehicle data from API
+        async function loadVehicleData() {
+            try {
+                const response = await fetch('/api/vehicle-data');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch vehicle data');
+                }
+                const data = await response.json();
+                
+                // Populate year dropdown
+                if (data.years && data.years.length > 0) {
+                    yearSelect.innerHTML = '<option value="">Select Year</option>';
+                    data.years.forEach(year => {
+                        if (year) {
+                            const option = document.createElement('option');
+                            option.value = year;
+                            option.textContent = year;
+                            yearSelect.appendChild(option);
+                        }
+                    });
+                }
+                
+                // Populate make dropdown
+                if (data.makes && data.makes.length > 0) {
+                    makeSelect.innerHTML = '<option value="">Select Make</option>';
+                    data.makes.forEach(make => {
+                        if (make) {
+                            const option = document.createElement('option');
+                            option.value = make;
+                            option.textContent = make;
+                            makeSelect.appendChild(option);
+                        }
+                    });
+                }
+                
+                // Reset model and system dropdowns
+                resetModelDropdown();
+                resetSystemDropdown();
+                
+            } catch (error) {
+                console.error('Error loading vehicle data:', error);
+            }
+        }
+        
+        // Load models based on selected make and year
+        async function loadModelsForMake() {
+            const make = makeSelect.value;
+            const year = yearSelect.value;
+            
+            if (!make) {
+                // Clear model dropdown if no make selected
+                resetModelDropdown();
+                return;
+            }
+            
+            try {
+                let url = `/api/models?make=${encodeURIComponent(make)}`;
+                if (year) {
+                    url += `&year=${encodeURIComponent(year)}`;
+                }
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch models');
+                }
+                const data = await response.json();
+                
+                // Populate model dropdown
+                modelSelect.innerHTML = '<option value="">Select Model</option>';
+                if (data.models && data.models.length > 0) {
+                    data.models.forEach(model => {
+                        if (model) {
+                            const option = document.createElement('option');
+                            option.value = model;
+                            option.textContent = model;
+                            modelSelect.appendChild(option);
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading models:', error);
+            }
+        }
+        
+        // Load systems based on selected make, model, and year
+        async function loadSystemsForVehicle() {
+            const make = makeSelect.value;
+            const model = modelSelect.value;
+            const year = yearSelect.value;
+            
+            if (!make || !model) {
+                // Clear system dropdown if make or model not selected
+                resetSystemDropdown();
+                return;
+            }
+            
+            try {
+                // Show loading state on the system dropdown
+                systemSelect.disabled = true;
+                systemSelect.innerHTML = '<option value="">Loading systems...</option>';
+                
+                // Construct URL with all selected parameters
+                let url = `/api/systems?make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`;
+                if (year) {
+                    url += `&year=${encodeURIComponent(year)}`;
+                }
+                
+                console.log(`Fetching systems from: ${url}`);
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch systems');
+                }
+                const data = await response.json();
+                
+                // Completely clear the dropdown
+                systemSelect.innerHTML = '';
+                
+                // Add default option
+                const defaultOption = document.createElement('option');
+                defaultOption.value = "";
+                defaultOption.textContent = "Select System";
+                systemSelect.appendChild(defaultOption);
+                
+                // Always add the "All Systems" option
+                const allSystemsOption = document.createElement('option');
+                allSystemsOption.value = "All Systems";
+                allSystemsOption.textContent = "All Systems";
+                systemSelect.appendChild(allSystemsOption);
+                
+                console.log(`Received ${data.systems ? data.systems.length : 0} systems from API`);
+                
+                // Add each system from the API
+                if (data.systems && data.systems.length > 0) {
+                    data.systems.forEach(system => {
+                        if (system) {
+                            const option = document.createElement('option');
+                            option.value = system;
+                            option.textContent = system;
+                            systemSelect.appendChild(option);
+                        }
+                    });
+                }
+                
+                // Reset system selection
+                vehicleContext.systems = [];
+            } catch (error) {
+                console.error('Error loading systems:', error);
+                resetSystemDropdown();
+            } finally {
+                // Re-enable the dropdown
+                systemSelect.disabled = false;
+            }
+        }
+        
+        // Reset model dropdown to initial state
+        function resetModelDropdown() {
+            modelSelect.innerHTML = '<option value="">Select Model</option>';
+            vehicleContext.model = null;
+        }
+        
+        // System dropdown management
+        const systemDropdownsContainer = document.getElementById('systemDropdownsContainer');
+        const addSystemBtn = document.getElementById('addSystemBtn');
+        let systemDropdownCounter = 1; // To create unique IDs for new dropdowns
+        
+        // Add new system dropdown
+        addSystemBtn.addEventListener('click', function() {
+            addSystemDropdown();
+        });
+        
+        function addSystemDropdown() {
+            systemDropdownCounter++;
+            const newDropdownId = `systemSelect_${systemDropdownCounter}`;
+            
+            // Create the dropdown group container
+            const dropdownGroup = document.createElement('div');
+            dropdownGroup.className = 'system-dropdown-group';
+            
+            // Create the select element
+            const newSelect = document.createElement('select');
+            newSelect.id = newDropdownId;
+            newSelect.className = 'vehicle-select system-select';
+            
+            // Add default options
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = 'Select System';
+            newSelect.appendChild(defaultOption);
+            
+            const allSystemsOption = document.createElement('option');
+            allSystemsOption.value = 'All Systems';
+            allSystemsOption.textContent = 'All Systems';
+            newSelect.appendChild(allSystemsOption);
+            
+            // Copy options from the primary system dropdown
+            const primaryDropdown = document.getElementById('systemSelect');
+            if (primaryDropdown && primaryDropdown.options.length > 2) {
+                for (let i = 2; i < primaryDropdown.options.length; i++) {
+                    const option = document.createElement('option');
+                    option.value = primaryDropdown.options[i].value;
+                    option.textContent = primaryDropdown.options[i].textContent;
+                    newSelect.appendChild(option);
+                }
+            }
+            
+            // Create remove button
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-system-btn';
+            removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+            removeBtn.title = 'Remove System';
+            removeBtn.addEventListener('click', function() {
+                // Remove from DOM
+                dropdownGroup.remove();
+                
+                // Update systems in vehicle context
+                updateSystemsContext();
+            });
+            
+            // Add change event listener to update the vehicle context
+            newSelect.addEventListener('change', function() {
+                updateSystemsContext();
+            });
+            
+            // Add elements to the group
+            dropdownGroup.appendChild(newSelect);
+            dropdownGroup.appendChild(removeBtn);
+            
+            // Add the group to the container
+            systemDropdownsContainer.appendChild(dropdownGroup);
+        }
+        
+        // Update all systems in the vehicle context
+        function updateSystemsContext() {
+            // Get all system dropdowns
+            const systemDropdowns = document.querySelectorAll('.system-select');
+            
+            // Clear the systems array
+            vehicleContext.systems = [];
+            
+            // Add each selected system to the context
+            systemDropdowns.forEach(dropdown => {
+                if (dropdown.value) {
+                    vehicleContext.systems.push(dropdown.value);
+                }
+            });
+            
+            console.log('Updated systems in vehicle context:', vehicleContext.systems);
+        }
+        
+        // Modified reset function for system dropdowns
+        function resetSystemDropdown() {
+            // Reset the primary dropdown
+            systemSelect.innerHTML = '<option value="">Select System</option>';
+            // Always add the "All Systems" option
+            const allSystemsOption = document.createElement('option');
+            allSystemsOption.value = "All Systems";
+            allSystemsOption.textContent = "All Systems";
+            systemSelect.appendChild(allSystemsOption);
+            
+            // Remove all additional dropdowns
+            const additionalDropdowns = document.querySelectorAll('.system-dropdown-group:not(:first-child)');
+            additionalDropdowns.forEach(dropdown => dropdown.remove());
+            
+            // Reset system counter
+            systemDropdownCounter = 1;
+            
+            // Clear systems from vehicle context
+            vehicleContext.systems = [];
+        }
+
+        // Handle dropdown selection changes
+        yearSelect.addEventListener('change', function() {
+            vehicleContext.year = this.value || null;
+            // Reload models when year changes
+            loadModelsForMake();
+            
+            // If we have both make and model selected, update the systems dropdown
+            if (makeSelect.value && modelSelect.value) {
+                loadSystemsForVehicle();
+            } else {
+                // Otherwise just reset the systems dropdown
+                resetSystemDropdown();
+            }
+        });
+        
+        makeSelect.addEventListener('change', function() {
+            vehicleContext.make = this.value || null;
+            // Reload models for the selected make and year
+            loadModelsForMake();
+            // Reset system dropdown when make changes since the model will also change
+            resetSystemDropdown();
+            
+            // Clear the model selection since it's no longer valid
+            modelSelect.value = '';
+            vehicleContext.model = null;
+        });
+        
+        modelSelect.addEventListener('change', function() {
+            vehicleContext.model = this.value || null;
+            
+            // If we have a model selected and a make, update systems
+            if (this.value && makeSelect.value) {
+                // Load systems for the selected vehicle
+                loadSystemsForVehicle();
+            } else {
+                // Reset system dropdown if model is cleared
+                resetSystemDropdown();
+            }
+        });
+        
+        systemSelect.addEventListener('change', function() {
+            updateSystemsContext();
+        });
+        
+        // Modified clear vehicle function to handle multiple systems
+        clearVehicleBtn.addEventListener('click', function() {
+            yearSelect.value = '';
+            makeSelect.value = '';
+            resetModelDropdown();
+            resetSystemDropdown();
+            
+            vehicleContext = {
+                year: null,
+                make: null,
+                model: null,
+                systems: []
+            };
+        });
+
+        // Load vehicle data when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadVehicleData();
+            
+            // Initialize POI diagram
+            initializePOI();
+            
+            // Connect POI clearing to the clear vehicle button
+            const clearVehicleBtn = document.getElementById('clearVehicleBtn');
+            if (clearVehicleBtn) {
+                // Add POI clearing to existing clear button functionality
+                clearVehicleBtn.addEventListener('click', clearPOISelections);
+            }
+        });
+        
+        // Search button handler
+        document.getElementById('searchVehicleBtn').addEventListener('click', function() {
+            // Check if at least make and model are selected
+            if (!vehicleContext.make || !vehicleContext.model) {
+                appendMessage("Please select at least a Make and Model before searching.", false);
+                return;
+            }
+            
+            // Get POI selections if any
+            const selectedMarkers = Array.from(document.querySelectorAll('.poi-marker.selected'));
+            const poiAreas = selectedMarkers.map(marker => marker.dataset.poiArea);
+            const poiNames = selectedMarkers.map(marker => marker.dataset.poiName);
+            const poiNumbers = selectedMarkers.map(marker => marker.querySelector('.poi-number').textContent);
+            const uniqueAreas = [...new Set(poiAreas)];
+            
+            // Create a map of POIs by area
+            const poiByArea = {};
+            selectedMarkers.forEach(marker => {
+                const area = marker.dataset.poiArea;
+                const poiName = marker.dataset.poiName;
+                const poiNumber = marker.querySelector('.poi-number').textContent;
+                
+                if (!poiByArea[area]) {
+                    poiByArea[area] = [];
+                }
+                poiByArea[area].push(`#${poiNumber} (${poiName})`);
+            });
+            
+            // Check if we have multiple areas selected
+            const hasMultipleAreas = uniqueAreas.length > 1;
+            
+            // If multiple areas are selected, we'll handle them differently
+            if (selectedPOIs.length > 0 && hasMultipleAreas) {
+                // Create a consolidated response for all POIs
+                multiAreaSearch(uniqueAreas, poiByArea, poiNames, poiNumbers);
+            } else {
+                // Standard single area or no POI search
+                sendStandardSearch(uniqueAreas, poiByArea, poiNames, poiNumbers);
+            }
+        });
+        
+        // Handle multiple area POI search by sending separate queries for each area
+        function multiAreaSearch(uniqueAreas, poiByArea, poiNames, poiNumbers) {
+            // Let the user know we're handling multiple areas
+            appendMessage(`Querying ADAS calibration information for a ${vehicleContext.year || ''} ${vehicleContext.make} ${vehicleContext.model} with multiple impact areas:`, true);
+            
+            // Show a summary of the areas
+            let areasList = uniqueAreas.map(area => 
+                `- ${area.toUpperCase()} area: ${poiByArea[area].join(', ')}`
+            ).join('\n');
+            
+            appendMessage(areasList, true);
+
+            // Store the original vehicle context so we can restore it later
+            const originalContext = {...vehicleContext};
+            
+            // Get the active chat ID
+            const activeChatId = localStorage.getItem('activeChatId');
+            
+            // Process each area one at a time
+            uniqueAreas.forEach((area, index) => {
+                // Create a modified context with just this area
+                const tempContext = {...originalContext};
+                tempContext.poi_areas = [area];
+                tempContext.poi_ids = selectedPOIs.filter(id => {
+                    const marker = document.querySelector(`.poi-marker[data-poi-id="${id}"]`);
+                    return marker && marker.dataset.poiArea === area;
+                });
+                tempContext.poi_names = poiByArea[area];
+                tempContext.poi_by_area = {[area]: poiByArea[area]};
+                
+                // Build the query for this specific area - but don't show to user
+                const areaQuery = `Tell me about the calibration requirements for ${vehicleContext.year || ''} ${vehicleContext.make} ${vehicleContext.model} with damage in the ${area} area: ${poiByArea[area].join(', ')}. 
+
+Include:
+1. Specific affected ADAS systems or components in this area
+2. Required calibrations for this area
+3. Special considerations or potential complications
+4. Whether static or dynamic calibration is needed`;
+                
+                // Update the global context temporarily
+                vehicleContext = tempContext;
+                
+                // Add a separator ONLY BETWEEN areas (not before the first one)
+                if (index > 0) {
+                    appendMessage("\n\n---\n\n", false);
+                }
+                
+                // Send the query for this area
+                socket.emit('message', {
+                    message: areaQuery,
+                    vehicleContext: tempContext,
+                    chat_id: activeChatId
+                });
+            });
+            
+            // Restore original context after all queries sent
+            setTimeout(() => {
+                vehicleContext = {...originalContext};
+            }, 1000);
+        }
+        
+        // Handle standard search for single area or no POI
+        function sendStandardSearch(uniqueAreas, poiByArea, poiNames, poiNumbers) {
+            // Construct the query
+            let searchQuery = `Tell me about the calibration requirements for ${vehicleContext.year || ''} ${vehicleContext.make} ${vehicleContext.model}`;
+            
+            // Handle multiple systems
+            if (vehicleContext.systems && vehicleContext.systems.length > 0) {
+                // Check if "All Systems" is included
+                if (vehicleContext.systems.includes("All Systems")) {
+                    searchQuery += ` all ADAS systems`;
+                } else if (vehicleContext.systems.length === 1) {
+                    // Single system
+                    searchQuery += ` ${vehicleContext.systems[0]} system`;
+                } else {
+                    // Multiple systems
+                    searchQuery += ` for the following systems: ${vehicleContext.systems.join(', ')}`;
+                }
+            }
+            
+            // Add POI information if any selected
+            if (selectedPOIs.length > 0) {
+                searchQuery += ` with damage in the ${uniqueAreas[0]} area: ${poiByArea[uniqueAreas[0]].join(', ')}. 
+
+For this damage point, include:
+1. Specific affected ADAS systems or components
+2. Required calibrations for that specific damage area
+3. Special considerations or potential complications
+4. Whether static or dynamic calibration is needed`;
+                
+                // Add POI information to the vehicle context
+                vehicleContext.poi_ids = selectedPOIs;
+                vehicleContext.poi_areas = uniqueAreas;
+                vehicleContext.poi_names = poiNames;
+                vehicleContext.poi_by_area = poiByArea;
+                vehicleContext.address_all_pois = true;
+                vehicleContext.single_comprehensive_response = true;
+            } else {
+                // No POIs selected
+                delete vehicleContext.poi_ids;
+                delete vehicleContext.poi_areas;
+                delete vehicleContext.poi_names;
+                delete vehicleContext.poi_by_area;
+                delete vehicleContext.address_all_pois;
+                delete vehicleContext.single_comprehensive_response;
+            }
+            
+            // Show the query to the user
+            appendMessage(searchQuery, true);
+            
+            // Show loading indicator
+            if (window.showResponseLoading) {
+                window.showResponseLoading();
+            }
+            
+            // Get active chat ID
+            const activeChatId = localStorage.getItem('activeChatId');
+            
+            // Send the query
+            socket.emit('message', {
+                message: searchQuery,
+                vehicleContext: vehicleContext,
+                chat_id: activeChatId
+            });
+        }
+
+        // Initial greeting
+        appendMessage(`Hello! I'm Nicc AI, your ADAS calibration assistant. I can help you understand:
+
+* Calibration requirements for specific vehicles
+* ADAS system configurations
+* Calibration procedures and prerequisites
+* Service information and documentation
+
+How can I help you today?`);
+
+        // Add POI functionality
+        let selectedPOIs = []; // Store selected POIs
+        
+        // Initialize POI functionality
+        function initializePOI() {
+            // Define POI data with the provided mapping
+            const poiData = [
+                { id: 1, position_number: 1, position_name: "Passenger front corner", area: "front" },
+                { id: 2, position_number: 2, position_name: "Passenger Side Near mirror", area: "side" },
+                { id: 3, position_number: 3, position_name: "Passenger Side Front door", area: "side" },
+                { id: 4, position_number: 4, position_name: "Passenger Side Rear door", area: "side" },
+                { id: 5, position_number: 5, position_name: "Passenger side Rear Corner", area: "rear" },
+                { id: 6, position_number: 6, position_name: "Rear of vehicle", area: "rear" },
+                { id: 7, position_number: 7, position_name: "Driver Side Rear Corner", area: "rear" },
+                { id: 8, position_number: 8, position_name: "Driver Side Rear Door", area: "side" },
+                { id: 9, position_number: 9, position_name: "Driver Side Front Door", area: "side" },
+                { id: 10, position_number: 10, position_name: "Driver side close to mirror", area: "side" },
+                { id: 11, position_number: 11, position_name: "Driver side Front corner", area: "front" },
+                { id: 12, position_number: 12, position_name: "Front of the vehicle", area: "front" },
+                { id: 13, position_number: 13, position_name: "Center/Roof of vehicle", area: "center" }
+            ];
+            
+            createPOIMarkers(poiData);
+        }
+        
+        // Create POI markers on the vehicle diagram
+        function createPOIMarkers(poiData) {
+            const markersContainer = document.getElementById('poiMarkers');
+            markersContainer.innerHTML = '';
+            
+            // Define positions for different POI locations based on the image
+            // These coordinates match the exact positions in the POISheet.png
+            const positions = {
+                // Left side (bottom to top in order)
+                1: { left: '24%', top: '85%' },   // Bottom left corner
+                2: { left: '24%', top: '68%' },   // Left side rear 
+                3: { left: '24%', top: '50%' },   // Left side middle
+                4: { left: '24%', top: '32%' },   // Left side front
+                5: { left: '24%', top: '16%' },   // Top left corner
+                
+                // Center points
+                6: { left: '50%', top: '7%' },   // Front center
+                
+                // Right side (bottom to top in order - corrected to match image)
+                11: { left: '76%', top: '85%' },  // Top right corner
+                10: { left: '76%', top: '68%' },  // Right side front
+                9: { left: '76%', top: '50%' },   // Right side middle
+                8: { left: '76%', top: '32%' },   // Right side rear
+                7: { left: '76%', top: '16%' },   // Bottom right corner
+                
+                // Bottom and center
+                12: { left: '50%', top: '93%' },  // Bottom center
+                13: { left: '50%', top: '46%' }   // Center of vehicle
+            };
+            
+            // Create all markers based on the positions object
+            poiData.forEach(poi => {
+                const position = positions[poi.position_number];
+                if (position) {
+                    // Create a div for each marker
+                    const marker = document.createElement('div');
+                    marker.className = 'poi-marker';
+                    marker.dataset.poiId = poi.id;
+                    marker.dataset.poiName = poi.position_name;
+                    marker.dataset.poiArea = poi.area; // Use the area directly from POI data
+                    marker.title = poi.position_name;
+                    marker.style.left = position.left;
+                    marker.style.top = position.top;
+                    
+                    // Add number inside the marker
+                    const numberEl = document.createElement('span');
+                    numberEl.className = 'poi-number';
+                    numberEl.textContent = poi.position_number;
+                    marker.appendChild(numberEl);
+                    
+                    // Add event listener
+                    marker.addEventListener('click', togglePOISelection);
+                    markersContainer.appendChild(marker);
+                }
+            });
+        }
+        
+        // Toggle POI selection when a marker is clicked
+        function togglePOISelection(event) {
+            const marker = event.currentTarget;
+            const poiId = parseInt(marker.dataset.poiId, 10); // Convert to number
+            const poiName = marker.dataset.poiName;
+            
+            if (marker.classList.contains('selected')) {
+                // Deselect POI
+                marker.classList.remove('selected');
+                selectedPOIs = selectedPOIs.filter(id => id !== poiId);
+            } else {
+                // Select POI
+                marker.classList.add('selected');
+                selectedPOIs.push(poiId);
+            }
+            
+            console.log("Selected POIs:", selectedPOIs);
+            updateSelectedPOIsList();
+        }
+        
+        // Update the list of selected POIs
+        function updateSelectedPOIsList() {
+            const poiList = document.getElementById('poiList');
+            if (selectedPOIs.length === 0) {
+                poiList.textContent = "None";
+            } else {
+                const selectedMarkers = Array.from(document.querySelectorAll('.poi-marker.selected'));
+                const poiNames = selectedMarkers.map(marker => {
+                    const poiName = marker.dataset.poiName;
+                    const poiNumber = marker.querySelector('.poi-number').textContent;
+                    return `#${poiNumber} (${poiName})`;
+                });
+                
+                // Group POIs by area
+                const poiAreaMap = {};
+                selectedMarkers.forEach(marker => {
+                    const area = marker.dataset.poiArea;
+                    if (!poiAreaMap[area]) {
+                        poiAreaMap[area] = [];
+                    }
+                    const poiNumber = marker.querySelector('.poi-number').textContent;
+                    poiAreaMap[area].push(poiNumber);
+                });
+                
+                // Create summary text
+                const areaList = Object.entries(poiAreaMap)
+                    .map(([area, numbers]) => `${area} (${numbers.join(', ')})`)
+                    .join(', ');
+                    
+                // Set the text with numbered POIs
+                poiList.innerHTML = `<strong>${areaList}</strong><br>${poiNames.join(', ')}`;
+            }
+        }
+        
+        // Clear POI selections
+        function clearPOISelections() {
+            document.querySelectorAll('.poi-marker.selected').forEach(marker => {
+                marker.classList.remove('selected');
+            });
+            selectedPOIs = [];
+            updateSelectedPOIsList();
+        }
+
+        // Handle VIN decode
+        document.getElementById('decodeVinBtn').addEventListener('click', function() {
+            const vinInput = document.getElementById('vinInput');
+            const vinStatus = document.getElementById('vinStatus');
+            const vin = vinInput.value.trim().toUpperCase();
+            
+            // Clear previous status
+            vinStatus.textContent = '';
+            vinStatus.className = 'vin-status';
+            
+            // Validate VIN format
+            if (!vin) {
+                vinStatus.textContent = 'Please enter a VIN';
+                vinStatus.classList.add('error');
+                return;
+            }
+            
+            if (vin.length !== 17) {
+                vinStatus.textContent = 'VIN must be 17 characters';
+                vinStatus.classList.add('error');
+                return;
+            }
+            
+            // Show loading state
+            vinStatus.classList.add('loading');
+            vinStatus.innerHTML = '<div class="loading-indicator"><span></span><span></span><span></span></div> Decoding VIN...';
+            
+            // Call the API
+            fetch('/api/vin-decode', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ vin: vin })
+            })
+            .then(response => response.json())
+            .then(data => {
+                vinStatus.classList.remove('loading');
+                
+                if (data.success) {
+                    // Update the vehicle selection dropdowns
+                    if (data.year) {
+                        const yearSelect = document.getElementById('yearSelect');
+                        for (let i = 0; i < yearSelect.options.length; i++) {
+                            if (yearSelect.options[i].value === data.year) {
+                                yearSelect.selectedIndex = i;
+                                // Trigger the year change event
+                                const event = new Event('change');
+                                yearSelect.dispatchEvent(event);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Set a timeout to allow the make dropdown to populate after year change
+                    setTimeout(() => {
+                        if (data.make) {
+                            const makeSelect = document.getElementById('makeSelect');
+                            // Wait for make options to be populated
+                            for (let i = 0; i < makeSelect.options.length; i++) {
+                                if (makeSelect.options[i].value.toLowerCase() === data.make.toLowerCase()) {
+                                    makeSelect.selectedIndex = i;
+                                    // Trigger the make change event
+                                    const event = new Event('change');
+                                    makeSelect.dispatchEvent(event);
+                                    break;
+                                }
+                            }
+                            
+                            // Set a timeout to allow the model dropdown to populate after make change
+                            setTimeout(() => {
+                                if (data.model && data.model !== 'Unknown') {
+                                    const modelSelect = document.getElementById('modelSelect');
+                                    // Find closest match for model
+                                    let bestMatch = -1;
+                                    let bestMatchScore = 0;
+                                    
+                                    for (let i = 0; i < modelSelect.options.length; i++) {
+                                        const optionValue = modelSelect.options[i].value.toLowerCase();
+                                        const dataModel = data.model.toLowerCase();
+                                        
+                                        // Check if model is a substring of option or vice versa
+                                        if (optionValue.includes(dataModel) || dataModel.includes(optionValue)) {
+                                            // Calculate how close the match is (lower is better)
+                                            const score = Math.abs(optionValue.length - dataModel.length);
+                                            if (bestMatch === -1 || score < bestMatchScore) {
+                                                bestMatch = i;
+                                                bestMatchScore = score;
+                                            }
+                                        }
+                                    }
+                                    
+                                    // If we found a match, select it
+                                    if (bestMatch !== -1) {
+                                        modelSelect.selectedIndex = bestMatch;
+                                        // Trigger the model change event
+                                        const event = new Event('change');
+                                        modelSelect.dispatchEvent(event);
+                                    }
+                                }
+                                
+                                // Show success message
+                                vinStatus.textContent = 'Vehicle identified: ' + 
+                                    (data.year || '') + ' ' + 
+                                    (data.make || '') + ' ' + 
+                                    (data.model !== 'Unknown' ? data.model : '');
+                                vinStatus.classList.add('success');
+                                
+                                // Update the vehicle context
+                                vehicleContext.year = data.year;
+                                vehicleContext.make = data.make;
+                                if (data.model !== 'Unknown') {
+                                    vehicleContext.model = data.model;
+                                }
+                                
+                            }, 500); // Wait for model dropdown to populate
+                        }
+                    }, 500); // Wait for make dropdown to populate
+                } else {
+                    // Show error message
+                    vinStatus.textContent = data.error || 'Failed to decode VIN';
+                    vinStatus.classList.add('error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                vinStatus.classList.remove('loading');
+                vinStatus.textContent = 'Error decoding VIN';
+                vinStatus.classList.add('error');
+            });
+        });
+        
+        // Allow pressing Enter in VIN input to trigger decode
+        document.getElementById('vinInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('decodeVinBtn').click();
+            }
+        });
+    </script>
+    
+    <!-- Debug script for troubleshooting -->
+    <script src="/static/js/debug.js"></script>
+    
+    <!-- Vehicle extraction script for automatically updating vehicle dropdowns from text input -->
+    <script src="/static/js/vehicle-extractor.js"></script>
+</body>
+</html> 

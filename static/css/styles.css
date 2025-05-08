@@ -1,0 +1,110 @@
+/* Styling for pinned chats and separators */
+.pinned-separator {
+    font-size: 12px;
+    color: #999;
+    padding: 8px 16px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background-color: #2a2a2a;
+    border-bottom: 1px solid #3a3a3a;
+    margin-top: 4px;
+}
+
+/* Chat item styles */
+.chat-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 15px;
+    border-bottom: 1px solid #333;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    background-color: #212121;
+    color: #e0e0e0;
+}
+
+.chat-item:hover {
+    background-color: #2c2c2c;
+}
+
+.chat-item.active {
+    background-color: #2d3748;
+    border-left: 3px solid #3182ce;
+}
+
+.chat-item.pinned {
+    background-color: #2c2c2c;
+    border-left: 3px solid #3182ce;
+    position: relative;
+}
+
+.chat-item-content {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.chat-item-icon {
+    color: #888;
+    margin-right: 10px;
+    font-size: 14px;
+}
+
+.chat-item-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 14px;
+}
+
+.chat-item-actions {
+    display: none;
+    margin-left: 10px;
+}
+
+.chat-item:hover .chat-item-actions {
+    display: flex;
+}
+
+.chat-action-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 4px;
+    margin-left: 5px;
+    border-radius: 3px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.chat-action-btn:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Pinned button style */
+.chat-action-btn.pin-btn.pinned {
+    color: #3182ce;
+}
+
+/* Rotated thumbtack for pinned items */
+.chat-item.pinned .chat-action-btn.pin-btn .fa-thumbtack {
+    transform: rotate(45deg);
+}
+
+/* Style for the pin button */
+.pin-button {
+    /* These styles will be removed */
+}
+
+.pin-button:hover {
+    /* These styles will be removed */
+}
+
+.pin-button.pinned {
+    /* These styles will be removed */
+} 
