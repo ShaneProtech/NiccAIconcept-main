@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NICC Widget Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background: #f4f4f4;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .demo-section {
+            margin: 30px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 5px;
+            border-left: 4px solid #2196F3;
+        }
+        .widget-info {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        .code {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            font-family: monospace;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚗 NICC Widget Integration Test</h1>
+        
+        <div class="widget-info">
+            <strong>✅ NICC Widget Active!</strong><br>
+            Look for the floating "Ask NICC" button in the bottom-right corner of your screen.
+        </div>
+        
+        <div class="demo-section">
+            <h2>Widget Controls</h2>
+            <p>Use these buttons to programmatically control the widget:</p>
+            <button onclick="NICCWidget.open()">Open Widget</button>
+            <button onclick="NICCWidget.close()">Close Widget</button>
+            <button onclick="NICCWidget.toggle()">Toggle Widget</button>
+        </div>
+        
+        <div class="demo-section">
+            <h2>How to Use the Widget</h2>
+            <ol>
+                <li><strong>VIN Decode:</strong> Enter a 17-character VIN to automatically identify the vehicle</li>
+                <li><strong>Manual Selection:</strong> Choose Year, Make, and Model manually</li>
+                <li><strong>Search:</strong> Click "Search Calibration Info" to find ADAS procedures</li>
+            </ol>
+        </div>
+        
+        <div class="demo-section">
+            <h2>Sample VINs for Testing</h2>
+            <p>Try these sample VINs to test the functionality:</p>
+            <div class="code">
+                1HGCM82633A004352 (Honda Accord)<br>
+                1FTFW1ET5DFC10312 (Ford F-150)<br>
+                WBA3B1C51DF123456 (BMW 3 Series)
+            </div>
+        </div>
+        
+        <div class="demo-section">
+            <h2>Integration Code</h2>
+            <p>To add this widget to your website, simply include this script tag:</p>
+            <div class="code">
+                &lt;script src="http://localhost:5001/embed.js" data-auto-init&gt;&lt;/script&gt;
+            </div>
+        </div>
+        
+        <div class="demo-section">
+            <h2>Custom Configuration</h2>
+            <p>You can customize the widget appearance and behavior:</p>
+            <div class="code">
+&lt;script src="http://localhost:5001/embed.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+NICCWidget.init({
+    position: 'bottom-left',
+    buttonText: 'Vehicle Help',
+    buttonColor: '#ff6b35',
+    width: '450px',
+    height: '650px'
+});
+&lt;/script&gt;
+            </div>
+        </div>
+        
+        <p style="text-align: center; color: #666; margin-top: 40px;">
+            <em>This is a demonstration page for the NICC Embed Widget</em>
+        </p>
+    </div>
+    
+    <!-- NICC Widget - Auto-initialize -->
+    <script src="http://localhost:5001/embed.js" data-auto-init></script>
+</body>
+</html> 

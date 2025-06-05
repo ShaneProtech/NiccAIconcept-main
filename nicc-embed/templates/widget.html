@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NICC Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/widget.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div id="nicc-widget" class="nicc-widget">
+        <div class="nicc-header">
+            <div class="nicc-title">
+                <i class="fas fa-robot"></i>
+                Ask NICC
+            </div>
+            <button id="nicc-close" class="nicc-close-btn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="nicc-content">
+            <!-- Chat Messages Area -->
+            <div id="chat-messages" class="chat-messages">
+                <div class="welcome-message">
+                    <div class="nicc-avatar">🤖</div>
+                    <div class="message-content">
+                        <strong>Hi! I'm NICC, your ADAS calibration assistant.</strong><br>
+                        You can ask me about vehicle calibration procedures, scan tools, or enter a VIN for quick lookup.
+                        <div class="quick-actions">
+                            <button class="quick-btn" onclick="insertQuickText('How do I reset ADAS systems after windshield replacement?')">
+                                <i class="fas fa-redo"></i> Reset Procedures
+                            </button>
+                            <button class="quick-btn" onclick="insertQuickText('What do common ADAS error codes mean?')">
+                                <i class="fas fa-exclamation-triangle"></i> Error Codes
+                            </button>
+                            <button class="quick-btn" onclick="insertQuickText('What are the basic ADAS calibration steps?')">
+                                <i class="fas fa-list-ol"></i> Calibration Steps
+                            </button>
+                            <button class="quick-btn" onclick="insertQuickText('What tools do I need for ADAS calibration?')">
+                                <i class="fas fa-toolbox"></i> Tool Requirements
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Quick VIN Input -->
+            <div class="vin-quick-section">
+                <div class="vin-input-group">
+                    <input type="text" id="vin-input" placeholder="Quick VIN lookup..." maxlength="17">
+                    <button id="vin-decode-btn" class="vin-decode-btn" title="Decode VIN">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Chat Input Area -->
+            <div class="chat-input-area">
+                <div class="input-container">
+                    <textarea id="chat-input" placeholder="Ask NICC about ADAS calibration..." rows="2"></textarea>
+                    <button id="send-btn" class="send-btn">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="nicc-footer">
+            <small>💡 Ask about calibration procedures, scan tools, or vehicle requirements</small>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/widget.js') }}"></script>
+</body>
+</html> 

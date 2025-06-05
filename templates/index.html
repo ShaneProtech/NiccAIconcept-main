@@ -133,6 +133,23 @@
                     </button>
                 </div>
                 <div id="vinStatus" class="vin-status"></div>
+                <div id="nhtsaButtonContainer" class="nhtsa-button-container" style="display: none;">
+                    <button id="nhtsaToggleBtn" class="nhtsa-toggle-btn">
+                        <i class="fas fa-shield-alt"></i> Show NHTSA ADAS Comp
+                    </button>
+                </div>
+                <div id="nhtsaAdasDisplay" class="nhtsa-adas-display" style="display: none;">
+                    <div class="nhtsa-content">
+                        <div class="nhtsa-loading" style="display: none;">
+                            <div class="loading-indicator">
+                                <span></span><span></span><span></span>
+                            </div>
+                            Loading NHTSA ADAS data...
+                        </div>
+                        <div class="nhtsa-results" style="display: none;"></div>
+                        <div class="nhtsa-error" style="display: none;"></div>
+                    </div>
+                </div>
             </div>
             
             <!-- Add POI Diagram Section -->
@@ -262,38 +279,16 @@
 
         function sendMessage() {
             const message = userInput.value.trim();
-            if (message) {
-                // Check if a chat is active by looking for a chat_id in localStorage
-                const activeChatId = localStorage.getItem('activeChatId');
-                
-                if (!activeChatId) {
-                    // No active chat, create one first
-                    fetch('/api/chats/new', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        }
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            // Set as active chat
-                            localStorage.setItem('activeChatId', data.chat_id);
-                            // Now send the message
-                            sendMessageToChat(message, data.chat_id);
-                        } else {
-                            appendMessage("Error: Could not create a new chat. Please try again.", false);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error creating new chat:', error);
-                        appendMessage("Error: Could not create a new chat. Please try again.", false);
-                    });
-                } else {
-                    // Chat already exists, send message directly
-                    sendMessageToChat(message, activeChatId);
-                }
-            }
+            if (message === '') return;
+            
+            // Add debug logging for the vehicle context sent to backend
+            console.log('Sending message with vehicleContext:', JSON.stringify(vehicleContext));
+            
+            // Get active chat ID
+            const activeChatId = localStorage.getItem('activeChatId');
+            
+            // Send message with vehicle context
+            sendMessageToChat(message, activeChatId);
         }
         
         function sendMessageToChat(message, chatId) {
@@ -303,6 +298,9 @@
             if (window.showResponseLoading) {
                 window.showResponseLoading();
             }
+            
+            // Log the exact vehicle context being sent
+            console.log('Vehicle context at send time:', JSON.stringify(vehicleContext));
             
             // Include vehicle context with the message
             socket.emit('message', { 
@@ -333,17 +331,62 @@
         socket.on('error', function(data) {
             appendMessage(`Error: ${data.message}`);
         });
-        
-        // Chat history handling
+
+        /* 
+        // Chat history handling - This is now handled in main.js
         socket.on('chat_history', function(data) {
-            // Clear current messages
-            messages.innerHTML = '';
+            console.log('Received chat history:', data);
             
-            // Add messages from history
-            data.messages.forEach(msg => {
-                appendMessage(msg.content, msg.role === 'user');
-            });
+            // Verify this history is for the active chat (to avoid race conditions)
+            const activeChatId = localStorage.getItem('activeChatId');
+            if (data.chat_id && activeChatId && data.chat_id !== activeChatId) {
+                console.log(`Ignoring chat history for ${data.chat_id} because active chat is ${activeChatId}`);
+                return;
+            }
+            
+            // Remove any loading indicators first
+            const loadingMessages = document.querySelectorAll('.loading-message');
+            loadingMessages.forEach(msg => msg.remove());
+            
+            // Set a flag in session storage to indicate this chat was explicitly selected
+            // This helps distinguish between page refreshes and deliberate chat selections
+            if (data.chat_id) {
+                localStorage.setItem('activeChatId', data.chat_id);
+                console.log(`Set active chat ID in localStorage: ${data.chat_id}`);
+                
+                // Update the active status in the chat list
+                const chatItems = document.querySelectorAll('.chat-item');
+                chatItems.forEach(item => {
+                    if (item.dataset.chatId === data.chat_id) {
+                        item.classList.add('active');
+                    } else {
+                        item.classList.remove('active');
+                    }
+                });
+                
+                // Clear current messages only when a chat is explicitly selected
+                const messagesContainer = document.getElementById('messages');
+                messagesContainer.innerHTML = '';
+                
+                // Add messages from history
+                if (data.messages && data.messages.length > 0) {
+                    console.log(`Adding ${data.messages.length} messages from history`);
+                    data.messages.forEach(msg => {
+                        // Make sure we have valid content
+                        const content = msg.content || '';
+                        appendMessage(content, msg.role === 'user');
+                    });
+                    
+                    // Scroll to bottom
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                } else {
+                    console.log('No messages in history, showing welcome message');
+                    // No messages in history, show welcome message
+                    appendMessage("Hello! I'm Nicc AI, your ADAS calibration assistant. How can I help you today?", false);
+                }
+            }
         });
+        */
         
         // Handle chat rename events
         socket.on('chat_renamed', function(data) {
@@ -802,7 +845,13 @@
 
         // Handle dropdown selection changes
         yearSelect.addEventListener('change', function() {
+            const oldYear = vehicleContext.year;
             vehicleContext.year = this.value || null;
+            
+            // Add debug logging to track year changes
+            console.log(`Year changed from ${oldYear} to ${vehicleContext.year}`);
+            console.log('Current vehicleContext:', JSON.stringify(vehicleContext));
+            
             // Reload models when year changes
             loadModelsForMake();
             
@@ -857,6 +906,31 @@
                 model: null,
                 systems: []
             };
+            
+            // Clear VIN input and hide NHTSA button
+            const vinInput = document.getElementById('vinInput');
+            const vinStatus = document.getElementById('vinStatus');
+            const nhtsaButtonContainer = document.getElementById('nhtsaButtonContainer');
+            const nhtsaDisplay = document.getElementById('nhtsaAdasDisplay');
+            const nhtsaToggleBtn = document.getElementById('nhtsaToggleBtn');
+            
+            if (vinInput) vinInput.value = '';
+            if (vinStatus) {
+                vinStatus.textContent = '';
+                vinStatus.className = 'vin-status';
+            }
+            if (nhtsaButtonContainer) nhtsaButtonContainer.style.display = 'none';
+            if (nhtsaDisplay) {
+                nhtsaDisplay.style.display = 'none';
+                nhtsaDisplay.dataset.loaded = '';
+            }
+            if (nhtsaToggleBtn) {
+                nhtsaToggleBtn.innerHTML = '<i class="fas fa-shield-alt"></i> Show NHTSA ADAS Comp';
+            }
+            
+            // Clear stored VIN data
+            window.currentVIN = '';
+            window.currentVehicleYear = '';
         });
 
         // Load vehicle data when page loads
@@ -1063,7 +1137,7 @@ How can I help you today?`);
                 { id: 3, position_number: 3, position_name: "Passenger Side Front door", area: "side" },
                 { id: 4, position_number: 4, position_name: "Passenger Side Rear door", area: "side" },
                 { id: 5, position_number: 5, position_name: "Passenger side Rear Corner", area: "rear" },
-                { id: 6, position_number: 6, position_name: "Rear of vehicle", area: "rear" },
+                { id: 6, position_number: 6, position_name: "Rear of the vehicle", area: "rear" },
                 { id: 7, position_number: 7, position_name: "Driver Side Rear Corner", area: "rear" },
                 { id: 8, position_number: 8, position_name: "Driver Side Rear Door", area: "side" },
                 { id: 9, position_number: 9, position_name: "Driver Side Front Door", area: "side" },
@@ -1304,6 +1378,14 @@ How can I help you today?`);
                                     (data.model !== 'Unknown' ? data.model : '');
                                 vinStatus.classList.add('success');
                                 
+                                // Show NHTSA button
+                                const nhtsaButtonContainer = document.getElementById('nhtsaButtonContainer');
+                                nhtsaButtonContainer.style.display = 'block';
+                                
+                                // Store VIN for NHTSA lookup
+                                window.currentVIN = document.getElementById('vinInput').value.trim().toUpperCase();
+                                window.currentVehicleYear = data.year;
+                                
                                 // Update the vehicle context
                                 vehicleContext.year = data.year;
                                 vehicleContext.make = data.make;
@@ -1318,6 +1400,13 @@ How can I help you today?`);
                     // Show error message
                     vinStatus.textContent = data.error || 'Failed to decode VIN';
                     vinStatus.classList.add('error');
+                    
+                    // Hide NHTSA button on error
+                    const nhtsaButtonContainer = document.getElementById('nhtsaButtonContainer');
+                    const nhtsaDisplay = document.getElementById('nhtsaAdasDisplay');
+                    nhtsaButtonContainer.style.display = 'none';
+                    nhtsaDisplay.style.display = 'none';
+                    nhtsaDisplay.dataset.loaded = '';
                 }
             })
             .catch(error => {
@@ -1325,6 +1414,13 @@ How can I help you today?`);
                 vinStatus.classList.remove('loading');
                 vinStatus.textContent = 'Error decoding VIN';
                 vinStatus.classList.add('error');
+                
+                // Hide NHTSA button on error
+                const nhtsaButtonContainer = document.getElementById('nhtsaButtonContainer');
+                const nhtsaDisplay = document.getElementById('nhtsaAdasDisplay');
+                nhtsaButtonContainer.style.display = 'none';
+                nhtsaDisplay.style.display = 'none';
+                nhtsaDisplay.dataset.loaded = '';
             });
         });
         
@@ -1334,6 +1430,211 @@ How can I help you today?`);
                 document.getElementById('decodeVinBtn').click();
             }
         });
+        
+        // Hide NHTSA button when VIN input is manually cleared
+        document.getElementById('vinInput').addEventListener('input', function(e) {
+            const vinValue = e.target.value.trim();
+            const nhtsaButtonContainer = document.getElementById('nhtsaButtonContainer');
+            const nhtsaDisplay = document.getElementById('nhtsaAdasDisplay');
+            const nhtsaToggleBtn = document.getElementById('nhtsaToggleBtn');
+            const vinStatus = document.getElementById('vinStatus');
+            
+            if (vinValue.length === 0) {
+                // VIN input is empty, hide NHTSA elements
+                if (nhtsaButtonContainer) nhtsaButtonContainer.style.display = 'none';
+                if (nhtsaDisplay) {
+                    nhtsaDisplay.style.display = 'none';
+                    nhtsaDisplay.dataset.loaded = '';
+                }
+                if (nhtsaToggleBtn) {
+                    nhtsaToggleBtn.innerHTML = '<i class="fas fa-shield-alt"></i> Show NHTSA ADAS Comp';
+                }
+                if (vinStatus) {
+                    vinStatus.textContent = '';
+                    vinStatus.className = 'vin-status';
+                }
+                
+                // Clear stored VIN data
+                window.currentVIN = '';
+                window.currentVehicleYear = '';
+            }
+        });
+        
+        // NHTSA ADAS Toggle Button Handler
+        document.getElementById('nhtsaToggleBtn').addEventListener('click', function() {
+            const nhtsaDisplay = document.getElementById('nhtsaAdasDisplay');
+            const button = this;
+            
+            if (nhtsaDisplay.style.display === 'none' || nhtsaDisplay.style.display === '') {
+                // Show NHTSA data
+                nhtsaDisplay.style.display = 'block';
+                button.innerHTML = '<i class="fas fa-shield-alt"></i> Hide NHTSA ADAS Comp';
+                
+                // Fetch NHTSA data if not already loaded
+                if (!nhtsaDisplay.dataset.loaded) {
+                    fetchNHTSAData();
+                }
+            } else {
+                // Hide NHTSA data
+                nhtsaDisplay.style.display = 'none';
+                button.innerHTML = '<i class="fas fa-shield-alt"></i> Show NHTSA ADAS Comp';
+            }
+        });
+        
+        // Function to fetch and display NHTSA ADAS data
+        function fetchNHTSAData() {
+            const nhtsaLoading = document.querySelector('.nhtsa-loading');
+            const nhtsaResults = document.querySelector('.nhtsa-results');
+            const nhtsaError = document.querySelector('.nhtsa-error');
+            const nhtsaDisplay = document.getElementById('nhtsaAdasDisplay');
+            
+            // Show loading state
+            nhtsaLoading.style.display = 'block';
+            nhtsaResults.style.display = 'none';
+            nhtsaError.style.display = 'none';
+            
+            // Prepare request data
+            const requestData = {
+                vin: window.currentVIN,
+                year: window.currentVehicleYear || ''
+            };
+            
+            // Fetch NHTSA data
+            fetch('/api/nhtsa-adas', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                nhtsaLoading.style.display = 'none';
+                
+                if (data.success) {
+                    displayNHTSAResults(data);
+                    nhtsaResults.style.display = 'block';
+                    nhtsaDisplay.dataset.loaded = 'true';
+                } else {
+                    nhtsaError.textContent = data.error || 'Failed to fetch NHTSA data';
+                    nhtsaError.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching NHTSA data:', error);
+                nhtsaLoading.style.display = 'none';
+                nhtsaError.textContent = 'Network error while fetching NHTSA data';
+                nhtsaError.style.display = 'block';
+            });
+        }
+        
+        // Function to display NHTSA results
+        function displayNHTSAResults(data) {
+            const resultsContainer = document.querySelector('.nhtsa-results');
+            
+            let html = '';
+            
+            // Vehicle information
+            if (data.vehicle_info) {
+                const vehicle = data.vehicle_info;
+                html += `
+                    <div class="nhtsa-vehicle-info">
+                        <h3>Vehicle Information</h3>
+                        <p><strong>${vehicle.year} ${vehicle.make} ${vehicle.model}</strong></p>
+                        ${vehicle.trim ? `<p>Trim: ${vehicle.trim}</p>` : ''}
+                        ${vehicle.body_class ? `<p>Body Class: ${vehicle.body_class}</p>` : ''}
+                    </div>
+                `;
+            }
+            
+            // ADAS Features
+            if (data.adas_features && data.adas_features.length > 0) {
+                html += `
+                    <div class="nhtsa-section">
+                        <h4>🛡️ Active Safety Systems (ADAS)</h4>
+                        <ul class="nhtsa-feature-list">
+                `;
+                
+                data.adas_features.forEach(feature => {
+                    html += `
+                        <li class="nhtsa-feature-item">
+                            <div class="nhtsa-feature-name">${feature.name}</div>
+                            <div class="nhtsa-feature-value">${feature.value}</div>
+                        </li>
+                    `;
+                });
+                
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // Passive Safety Features
+            if (data.passive_features && data.passive_features.length > 0) {
+                html += `
+                    <div class="nhtsa-section">
+                        <h4>🛡️ Passive Safety Systems</h4>
+                        <ul class="nhtsa-feature-list">
+                `;
+                
+                data.passive_features.forEach(feature => {
+                    html += `
+                        <li class="nhtsa-feature-item">
+                            <div class="nhtsa-feature-name">${feature.name}</div>
+                            <div class="nhtsa-feature-value">${feature.value}</div>
+                        </li>
+                    `;
+                });
+                
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // Other Safety Features
+            if (data.other_features && data.other_features.length > 0) {
+                html += `
+                    <div class="nhtsa-section">
+                        <h4>⚙️ Other Safety Features</h4>
+                        <ul class="nhtsa-feature-list">
+                `;
+                
+                data.other_features.forEach(feature => {
+                    html += `
+                        <li class="nhtsa-feature-item">
+                            <div class="nhtsa-feature-name">${feature.name}</div>
+                            <div class="nhtsa-feature-value">${feature.value}</div>
+                        </li>
+                    `;
+                });
+                
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // No features message
+            if (data.total_features === 0) {
+                html += `
+                    <div class="nhtsa-no-features">
+                        No ADAS or safety features reported for this vehicle in the NHTSA database.
+                    </div>
+                `;
+            }
+            
+            // Data source
+            html += `
+                <div class="nhtsa-data-source">
+                    Data provided by ${data.data_source || 'NHTSA vPIC API'}<br>
+                    Total features found: ${data.total_features || 0}
+                </div>
+            `;
+            
+            resultsContainer.innerHTML = html;
+        }
     </script>
     
     <!-- Debug script for troubleshooting -->

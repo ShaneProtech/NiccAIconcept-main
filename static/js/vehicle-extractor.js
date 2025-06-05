@@ -285,172 +285,236 @@ document.addEventListener('DOMContentLoaded', function() {
      * @return {object} - Object with year, make, and model properties
      */
     function extractVehicleFromText(text) {
-        const result = {
-            year: null,
-            make: null,
-            model: null
-        };
+        console.log("Analyzing text for vehicle information:", text);
         
-        // Extract year (4 digits between 1990-2024)
-        const yearRegex = /\b(19[9][0-9]|20[0-2][0-9])\b/g;
-        const yearMatch = text.match(yearRegex);
+        // If no text provided, return empty result
+        if (!text || text.trim() === "") {
+            return { hasVehicle: false, modelExplicitlyMentioned: false };
+        }
+        
+        const modelYears = Array.from({ length: 25 }, (_, i) => (2025 - i).toString());
+        
+        // Extract year (look for 4-digit number between 1990 and 2025)
+        let year = null;
+        const yearMatch = text.match(/\b(19[9][0-9]|20[0-2][0-9])\b/);
         if (yearMatch) {
-            // Use the first year found
-            result.year = yearMatch[0];
+            year = yearMatch[0];
+            console.log("Year detected in text:", year);
         }
         
-        // Common vehicle makes (patterns to match in text)
-        const makePatterns = {
-            'Honda': /\bhonda\b/i,
-            'Toyota': /\btoyota\b/i,
-            'Ford': /\bford\b/i,
-            'Chevrolet': /\b(chevy|chevrolet)\b/i,
-            'Nissan': /\bnissan\b/i,
-            'Hyundai': /\bhyundai\b/i,
-            'Kia': /\bkia\b/i,
-            'Jeep': /\bjeep\b/i,
-            'BMW': /\bbmw\b/i,
-            'Mercedes-Benz': /\b(mercedes|benz|mercedes[\s-]benz)\b/i,
-            'Audi': /\baudi\b/i,
-            'Lexus': /\blexus\b/i,
-            'Acura': /\bacura\b/i,
-            'Mazda': /\bmazda\b/i,
-            'Subaru': /\bsubaru\b/i,
-            'Volkswagen': /\b(vw|volkswagen)\b/i,
-            'Volvo': /\bvolvo\b/i,
-            'Cadillac': /\bcadillac\b/i,
-            'Buick': /\bbuick\b/i,
-            'GMC': /\bgmc\b/i,
-            'Chrysler': /\bchrysler\b/i,
-            'Dodge': /\bdodge\b/i,
-            'Ram': /\bram\b/i,
-            'Lincoln': /\blincoln\b/i,
-            'Infiniti': /\binfiniti\b/i,
-            'Genesis': /\bgenesis\b/i,
-            'Land Rover': /\b(land rover|range rover)\b/i,
-            'Jaguar': /\bjaguar\b/i,
-            'Porsche': /\bporsche\b/i,
-            'Tesla': /\btesla\b/i,
-            'Mitsubishi': /\bmitsubishi\b/i,
-            'MINI': /\bmini\b/i,
-            'Fiat': /\bfiat\b/i
+        // Common vehicle makes with variations
+        const makes = {
+            "Honda": ["honda"],
+            "Toyota": ["toyota"],
+            "Ford": ["ford"],
+            "Chevrolet": ["chevrolet", "chevy"],
+            "Nissan": ["nissan"],
+            "Hyundai": ["hyundai"],
+            "Kia": ["kia"],
+            "Subaru": ["subaru"],
+            "Mazda": ["mazda"],
+            "BMW": ["bmw"],
+            "Mercedes": ["mercedes", "mercedes-benz", "mercedes benz"],
+            "Lexus": ["lexus"],
+            "Acura": ["acura"],
+            "Audi": ["audi"],
+            "Volkswagen": ["volkswagen", "vw"],
+            "Volvo": ["volvo"],
+            "Jeep": ["jeep"],
+            "Chrysler": ["chrysler"],
+            "Dodge": ["dodge"],
+            "Buick": ["buick"],
+            "Cadillac": ["cadillac"],
+            "GMC": ["gmc"],
+            "Lincoln": ["lincoln"],
+            "Infiniti": ["infiniti"],
+            "Mitsubishi": ["mitsubishi"],
+            "Porsche": ["porsche"],
+            "Land Rover": ["land rover", "landrover"],
+            "Jaguar": ["jaguar"],
+            "Tesla": ["tesla"],
+            "Genesis": ["genesis"],
+            "RAM": ["ram", "dodge ram"]
         };
         
-        // Check for make matches
-        for (const [make, pattern] of Object.entries(makePatterns)) {
-            if (pattern.test(text)) {
-                result.make = make;
-                break;
-            }
-        }
+        // Find make in text
+        let make = null;
+        let makeIndex = Number.MAX_SAFE_INTEGER;
         
-        // Common model patterns by make
-        const modelPatterns = {
-            'Honda': {
-                'Accord': /\baccord\b/i,
-                'Civic': /\bcivic\b/i,
-                'CR-V': /\b(cr-?v|crv)\b/i,
-                'Pilot': /\bpilot\b/i,
-                'Odyssey': /\bodyssey\b/i,
-                'HR-V': /\b(hr-?v|hrv)\b/i,
-                'Ridgeline': /\bridgeline\b/i
-            },
-            'Toyota': {
-                'Camry': /\bcamry\b/i,
-                'Corolla': /\bcorolla\b/i,
-                'RAV4': /\b(rav4|rav-?4)\b/i,
-                'Highlander': /\bhighlander\b/i,
-                'Tacoma': /\btacoma\b/i,
-                'Tundra': /\btundra\b/i,
-                'Sienna': /\bsienna\b/i,
-                '4Runner': /\b4[-\s]?runner\b/i,
-                'Prius': /\bprius\b/i
-            },
-            'Ford': {
-                'F-150': /\b(f[-\s]?150|f150)\b/i,
-                'Escape': /\bescape\b/i,
-                'Explorer': /\bexplorer\b/i,
-                'Mustang': /\bmustang\b/i,
-                'Edge': /\bedge\b/i,
-                'Ranger': /\branger\b/i,
-                'Expedition': /\bexpedition\b/i,
-                'Bronco': /\bbronco\b/i
-            },
-            'Chevrolet': {
-                'Silverado': /\bsilverado\b/i,
-                'Equinox': /\bequinox\b/i,
-                'Malibu': /\bmalibu\b/i,
-                'Tahoe': /\btahoe\b/i,
-                'Suburban': /\bsuburban\b/i,
-                'Traverse': /\btraverse\b/i,
-                'Colorado': /\bcolorado\b/i,
-                'Camaro': /\bcamaro\b/i,
-                'Corvette': /\bcorvette\b/i
-            },
-            'Nissan': {
-                'Altima': /\baltima\b/i,
-                'Sentra': /\bsentra\b/i,
-                'Rogue': /\brogue\b/i,
-                'Pathfinder': /\bpathfinder\b/i,
-                'Frontier': /\bfrontier\b/i,
-                'Murano': /\bmurano\b/i,
-                'Maxima': /\bmaxima\b/i,
-                'Titan': /\btitan\b/i,
-                'Kicks': /\bkicks\b/i
-            },
-            'Hyundai': {
-                'Elantra': /\belantra\b/i,
-                'Sonata': /\bsonata\b/i,
-                'Tucson': /\btucson\b/i,
-                'Santa Fe': /\bsanta[-\s]?fe\b/i,
-                'Kona': /\bkona\b/i,
-                'Palisade': /\bpalisade\b/i,
-                'Venue': /\bvenue\b/i,
-                'Accent': /\baccent\b/i
-            },
-            'Kia': {
-                'Sorento': /\bsorento\b/i,
-                'Sportage': /\bsportage\b/i,
-                'Forte': /\bforte\b/i,
-                'Soul': /\bsoul\b/i,
-                'Telluride': /\btelluride\b/i,
-                'Optima': /\boptima\b/i,
-                'K5': /\bk5\b/i,
-                'Seltos': /\bseltos\b/i
-            }
-        };
-        
-        // If we found a make, check for models from that make
-        if (result.make && modelPatterns[result.make]) {
-            for (const [model, pattern] of Object.entries(modelPatterns[result.make])) {
-                if (pattern.test(text)) {
-                    result.model = model;
-                    break;
+        for (const [makeName, variations] of Object.entries(makes)) {
+            for (const variation of variations) {
+                // Look for the variation as a whole word
+                const regex = new RegExp(`\\b${variation}\\b`, 'i');
+                const match = text.match(regex);
+                if (match && match.index < makeIndex) {
+                    make = makeName;
+                    makeIndex = match.index;
                 }
             }
-        } else {
-            // If no make found or a make without model patterns, check all models
-            for (const makeModels of Object.values(modelPatterns)) {
-                for (const [model, pattern] of Object.entries(makeModels)) {
-                    if (pattern.test(text)) {
-                        result.model = model;
-                        // If we found a model but no make, try to infer the make
-                        if (!result.make) {
-                            for (const [make, models] of Object.entries(modelPatterns)) {
-                                if (model in models) {
-                                    result.make = make;
-                                    break;
-                                }
-                            }
+        }
+        
+        console.log("Make detected in text:", make);
+        
+        // Expanded models for common makes (organized by make for more accurate matching)
+        const modelsByMake = {
+            "Honda": ["accord", "civic", "cr-v", "crv", "pilot", "odyssey", "fit", "hr-v", "hrv", "ridgeline", "passport", "insight", "clarity", "element", "s2000"],
+            "Toyota": ["camry", "corolla", "rav4", "rav-4", "highlander", "tacoma", "tundra", "4runner", "four runner", "sienna", "prius", "avalon", "venza", "c-hr", "chr", "sequoia", "land cruiser", "gr86", "supra", "mirai", "yaris", "matrix"],
+            "Ford": ["f-150", "f150", "f-250", "f250", "f-350", "f350", "f-450", "f450", "f-550", "f550", "f-series", "f series", "mustang", "escape", "explorer", "edge", "expedition", "ranger", "fusion", "focus", "bronco", "maverick", "ecosport", "mach-e", "mach e", "transit", "super duty"],
+            "Chevrolet": ["silverado", "1500", "2500", "3500", "malibu", "equinox", "tahoe", "suburban", "traverse", "cruze", "impala", "camaro", "colorado", "blazer", "trailblazer", "bolt", "spark", "sonic", "trax", "corvette"],
+            "Nissan": ["altima", "sentra", "rogue", "pathfinder", "murano", "maxima", "frontier", "titan", "armada", "versa", "kicks", "juke", "leaf", "z", "370z", "350z", "gt-r", "gtr"],
+            "Hyundai": ["elantra", "sonata", "tucson", "santa fe", "santa", "kona", "palisade", "accent", "venue", "veloster", "ioniq", "nexo", "santa cruz"],
+            "Kia": ["optima", "k5", "sportage", "sorento", "telluride", "forte", "soul", "seltos", "carnival", "stinger", "niro", "rio", "ev6", "cadenza"],
+            "Subaru": ["outback", "forester", "impreza", "legacy", "crosstrek", "ascent", "wrx", "brz", "sti", "baja", "tribeca"],
+            "Mazda": ["mazda3", "mazda 3", "mazda6", "mazda 6", "cx-5", "cx5", "cx-9", "cx9", "mx-5", "mx5", "cx-30", "cx30", "cx-3", "cx3", "cx-50", "cx50", "cx-90", "cx90", "miata", "rx-8", "rx8"],
+            "BMW": ["3-series", "3 series", "5-series", "5 series", "7-series", "7 series", "x1", "x3", "x5", "x7", "m3", "m5", "m8", "i3", "i4", "i7", "i8", "z4", "8-series", "8 series", "4-series", "4 series", "2-series", "2 series"],
+            "Mercedes": ["c-class", "c class", "e-class", "e class", "s-class", "s class", "a-class", "a class", "glc", "gle", "gls", "g-class", "g class", "cla", "cls", "sl", "glb", "gla", "amg"],
+            "Audi": ["a3", "a4", "a5", "a6", "a7", "a8", "q3", "q5", "q7", "q8", "e-tron", "etron", "tt", "r8", "rs6", "rs7", "s3", "s4", "s5", "s6", "s7", "s8"],
+            "Volkswagen": ["jetta", "passat", "tiguan", "atlas", "golf", "gti", "gli", "id.4", "id4", "taos", "arteon", "beetle", "eos", "touareg", "cc"],
+            "RAM": ["1500", "2500", "3500", "promaster", "ram 1500", "ram 2500", "ram 3500", "ram promaster"],
+            "Jeep": ["wrangler", "grand cherokee", "cherokee", "compass", "renegade", "gladiator", "wagoneer", "grand wagoneer"]
+        };
+        
+        // Expanded generic models with more variations including frequent typos and alternative forms
+        const genericModels = [
+            // BMW
+            "3-series", "3 series", "3series", "3-serie", "5-series", "5 series", "5series", "5-serie",
+            "x1", "x2", "x3", "x4", "x5", "x6", "x7", "m3", "m4", "m5", "m8", 
+            // Audi
+            "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a-4", "a-6",
+            "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q-5", "q-7",
+            "s3", "s4", "s5", "s6", "s7", "s8", "rs3", "rs4", "rs5", "rs6", "rs7",
+            "e-tron", "etron", "e tron", "tt", "r8",
+            // Mercedes
+            "e-class", "e class", "eclass", "c-class", "c class", "cclass", 
+            "s-class", "s class", "sclass", "a-class", "a class", "aclass",
+            "gle", "glc", "gls", "gla", "glb", "sl", "cls", "cla", "amg",
+            // Lexus
+            "es", "gs", "is", "ls", "nx", "rx", "ux", "lx", "rc", "lc", "gx",
+            // Acura
+            "mdx", "rdx", "tlx", "ilx", "nsx", "rlx", "zdx", "tl", "tsx", "integra",
+            // Infiniti
+            "q50", "q60", "qx50", "qx55", "qx60", "qx80", 
+            // Volvo
+            "xc40", "xc60", "xc90", "s60", "s90", "v60", "v90",
+            // Jeep
+            "wrangler", "grand cherokee", "cherokee", "compass", "renegade", "gladiator",
+            // Chrysler
+            "pacifica", "300", "300c",
+            // Dodge/RAM
+            "charger", "challenger", "durango", "ram 1500", "ram 2500", "ram 3500", "1500", "2500", "3500",
+            // GM
+            "enclave", "envision", "encore", "ct4", "ct5", "xt4", "xt5", "xt6", "escalade", 
+            "sierra", "acadia", "terrain", "yukon", "silverado 1500", "silverado 2500", "silverado 3500",
+            // Ford
+            "f-150", "f-250", "f-350", "f150", "f250", "f350", "f 150", "f 250", "f 350",
+            // Lincoln
+            "navigator", "aviator", "corsair", "nautilus",
+            // Mitsubishi
+            "outlander", "eclipse cross", "mirage", "outlander sport",
+            // Tesla
+            "model 3", "model y", "model s", "model x", "cybertruck", "roadster",
+            // Genesis
+            "g70", "g80", "g90", "gv70", "gv80"
+        ];
+
+        // Function to check if text contains a model with flexibility
+        function containsModel(text, modelName) {
+            // Check several variations of the model name
+            const variations = [
+                modelName,
+                modelName.toLowerCase(),
+                modelName.toUpperCase(),
+                modelName.charAt(0).toUpperCase() + modelName.slice(1).toLowerCase(),
+                modelName.replace(/[-\s]/g, ''),
+                modelName.replace(/[-\s]/g, '-'),
+                modelName.replace(/[-\s]/g, ' ')
+            ];
+            
+            for (const variant of variations) {
+                // Try exact word match first
+                const wordRegex = new RegExp(`\\b${variant}\\b`, 'i');
+                if (wordRegex.test(text)) {
+                    return { match: true, variant: variant, exact: true };
+                }
+                
+                // Then try contains (for complex model names that might be split across words)
+                if (text.toLowerCase().includes(variant.toLowerCase())) {
+                    return { match: true, variant: variant, exact: false };
+                }
+            }
+            
+            return { match: false };
+        }
+        
+        // Find model in text
+        let model = null;
+        let modelIndex = Number.MAX_SAFE_INTEGER;
+        let modelExactMatch = false;
+        let modelExplicitlyMentioned = false;
+        
+        // First, prioritize models for the detected make
+        if (make && modelsByMake[make]) {
+            for (const modelName of modelsByMake[make]) {
+                // More flexible model matching
+                const regex = new RegExp(`\\b${modelName.replace(/-/g, '[- ]?')}\\b`, 'i');
+                const match = text.match(regex);
+                
+                if (match && match.index < modelIndex) {
+                    model = modelName;
+                    modelIndex = match.index;
+                    modelExactMatch = true;
+                    modelExplicitlyMentioned = true;
+                    console.log(`Found make-specific model "${modelName}" at position ${match.index}`);
+                }
+                
+                // Also try a more flexible content-based match if no exact match found
+                if (!modelExactMatch) {
+                    const containsResult = containsModel(text, modelName);
+                    if (containsResult.match) {
+                        // Find the position of this model in the text
+                        const variantPos = text.toLowerCase().indexOf(containsResult.variant.toLowerCase());
+                        if (variantPos >= 0 && variantPos < modelIndex) {
+                            model = modelName;
+                            modelIndex = variantPos;
+                            modelExactMatch = containsResult.exact;
+                            modelExplicitlyMentioned = true;
+                            console.log(`Found make-specific model "${modelName}" (variant: ${containsResult.variant}) at position ${variantPos}`);
                         }
-                        break;
                     }
                 }
-                if (result.model) break;
             }
         }
         
-        return result;
+        // If no model found for this make, try generic models
+        if (!model) {
+            for (const modelName of genericModels) {
+                const containsResult = containsModel(text, modelName);
+                if (containsResult.match) {
+                    // Find the position of this model in the text
+                    const variantPos = text.toLowerCase().indexOf(containsResult.variant.toLowerCase());
+                    if (variantPos >= 0 && variantPos < modelIndex) {
+                        model = modelName;
+                        modelIndex = variantPos;
+                        modelExactMatch = containsResult.exact;
+                        modelExplicitlyMentioned = true;
+                        console.log(`Found generic model "${modelName}" (variant: ${containsResult.variant}) at position ${variantPos}`);
+                    }
+                }
+            }
+        }
+        
+        console.log("Model detected in text:", model, modelExplicitlyMentioned ? "(explicitly mentioned)" : "(not explicitly mentioned)");
+        
+        // Determine if we have a valid vehicle reference
+        const hasVehicle = Boolean(year || make || model);
+        
+        return {
+            year: year,
+            make: make,
+            model: model,
+            hasVehicle: hasVehicle,
+            modelExplicitlyMentioned: modelExplicitlyMentioned
+        };
     }
     
     /**
@@ -458,83 +522,122 @@ document.addEventListener('DOMContentLoaded', function() {
      * @param {object} vehicleInfo - Object with year, make, and model properties
      */
     function updateVehicleDropdowns(vehicleInfo) {
-        const yearSelect = document.getElementById('yearSelect');
-        const makeSelect = document.getElementById('makeSelect');
-        const modelSelect = document.getElementById('modelSelect');
+        console.log("Updating dropdowns with vehicle info:", vehicleInfo);
         
-        if (!yearSelect || !makeSelect || !modelSelect) {
-            console.error('Vehicle dropdowns not found in the DOM');
+        // Get dropdown elements
+        const yearDropdown = document.getElementById('yearSelect');
+        const makeDropdown = document.getElementById('makeSelect');
+        const modelDropdown = document.getElementById('modelSelect');
+        
+        if (!yearDropdown || !makeDropdown || !modelDropdown) {
+            console.error("Could not find all dropdown elements");
             return;
         }
         
-        // Update year if found and the dropdown has that option
+        // Initialize or update vehicle context
+        if (!window.vehicleContext) {
+            window.vehicleContext = {};
+        }
+        
+        // Update year dropdown if found
         if (vehicleInfo.year) {
-            const yearOption = Array.from(yearSelect.options).find(opt => opt.value === vehicleInfo.year);
+            const yearOption = Array.from(yearDropdown.options)
+                .find(option => option.value === vehicleInfo.year);
+            
             if (yearOption) {
-                yearSelect.value = vehicleInfo.year;
-                console.log('Updated year dropdown to', vehicleInfo.year);
+                // Only update if it's a different value (prevent triggering unnecessary change events)
+                if (yearDropdown.value !== vehicleInfo.year) {
+                    yearDropdown.value = vehicleInfo.year;
+                    // Store in context
+                    window.vehicleContext.year = vehicleInfo.year;
+                    console.log("Updated year dropdown to:", vehicleInfo.year);
+                    // Trigger change event to update other dropdowns if needed
+                    yearDropdown.dispatchEvent(new Event('change'));
+                }
+            } else {
+                console.log(`Year ${vehicleInfo.year} not found in dropdown options`);
+                // Still store in context even if not in dropdown
+                window.vehicleContext.year = vehicleInfo.year;
             }
         }
         
-        // Update make if found and the dropdown has that option
+        // Update make dropdown if found
         if (vehicleInfo.make) {
-            const makeOption = Array.from(makeSelect.options).find(opt => 
-                opt.value.toLowerCase() === vehicleInfo.make.toLowerCase() ||
-                opt.text.toLowerCase() === vehicleInfo.make.toLowerCase()
-            );
+            const makeOption = Array.from(makeDropdown.options)
+                .find(option => option.value === vehicleInfo.make);
             
             if (makeOption) {
-                makeSelect.value = makeOption.value;
-                console.log('Updated make dropdown to', vehicleInfo.make);
-                
-                // Trigger change event to load models for this make
-                const event = new Event('change');
-                makeSelect.dispatchEvent(event);
-                
-                // Wait for models to load before trying to set the model
-                if (vehicleInfo.model) {
-                    setTimeout(() => {
-                        updateModelDropdown(vehicleInfo.model);
-                    }, 500);
+                // Check if this is a change from current value
+                if (makeDropdown.value !== vehicleInfo.make) {
+                    makeDropdown.value = vehicleInfo.make;
+                    // Store in context
+                    window.vehicleContext.make = vehicleInfo.make;
+                    console.log("Updated make dropdown to:", vehicleInfo.make);
+                    // Trigger change event to update model options
+                    makeDropdown.dispatchEvent(new Event('change'));
+                    
+                    // IMPORTANT: If the make changes but no model was explicitly mentioned,
+                    // clear any existing model selection to prevent incorrect assumptions
+                    if (!vehicleInfo.modelExplicitlyMentioned && modelDropdown.value) {
+                        console.log("Clearing model dropdown as make changed and no model was explicitly mentioned");
+                        setTimeout(() => {
+                            modelDropdown.value = '';
+                            window.vehicleContext.model = '';
+                        }, 300); // Wait for model dropdown to be populated with new models
+                    }
                 }
+            } else {
+                console.log(`Make ${vehicleInfo.make} not found in dropdown options`);
+                // Still store in context even if not in dropdown
+                window.vehicleContext.make = vehicleInfo.make;
             }
         }
         
-        // If no make change but we have a model, try to update the model directly
-        if (vehicleInfo.model && !vehicleInfo.make) {
-            updateModelDropdown(vehicleInfo.model);
-        }
-    }
-    
-    /**
-     * Update the model dropdown with the extracted model
-     * @param {string} model - The model to select
-     */
-    function updateModelDropdown(model) {
-        const modelSelect = document.getElementById('modelSelect');
-        if (!modelSelect) return;
-        
-        // First try exact match
-        let modelOption = Array.from(modelSelect.options).find(opt => 
-            opt.value.toLowerCase() === model.toLowerCase() ||
-            opt.text.toLowerCase() === model.toLowerCase()
-        );
-        
-        // If exact match not found, try partial match
-        if (!modelOption) {
-            modelOption = Array.from(modelSelect.options).find(opt => 
-                opt.text.toLowerCase().includes(model.toLowerCase()) ||
-                model.toLowerCase().includes(opt.text.toLowerCase())
-            );
+        // Update model dropdown if found AND explicitly mentioned
+        if (vehicleInfo.model && vehicleInfo.modelExplicitlyMentioned) {
+            console.log("Model explicitly mentioned, updating dropdown");
+            // Since model options depend on make, we need to wait for make changes to propagate
+            // Use a timeout to allow the make dropdown change event to update model options
+            setTimeout(() => {
+                if (modelDropdown.options.length <= 1) {
+                    console.log("Waiting for model options to load...");
+                    // If models haven't loaded yet, try again in a moment
+                    setTimeout(() => updateModelDropdown(vehicleInfo.model), 500);
+                    return;
+                }
+                
+                updateModelDropdown(vehicleInfo.model);
+            }, 300);
+        } else if (vehicleInfo.model && !vehicleInfo.modelExplicitlyMentioned) {
+            console.log("Model found but NOT explicitly mentioned, not updating dropdown");
         }
         
-        if (modelOption) {
-            modelSelect.value = modelOption.value;
-            console.log('Updated model dropdown to', model);
+        // Helper function to update the model dropdown
+        function updateModelDropdown(modelToSet) {
+            // First try exact match
+            let modelOption = Array.from(modelDropdown.options)
+                .find(option => option.value.toLowerCase() === modelToSet.toLowerCase());
             
-            // Trigger change event
-            const event = new Event('change');
-            modelSelect.dispatchEvent(event);
+            // If no exact match, try case-insensitive includes match
+            if (!modelOption) {
+                modelOption = Array.from(modelDropdown.options)
+                    .find(option => 
+                        option.value.toLowerCase().includes(modelToSet.toLowerCase()) || 
+                        modelToSet.toLowerCase().includes(option.value.toLowerCase())
+                    );
+            }
+            
+            if (modelOption) {
+                modelDropdown.value = modelOption.value;
+                window.vehicleContext.model = modelOption.value;
+                console.log("Updated model dropdown to:", modelOption.value);
+                // Trigger change event
+                modelDropdown.dispatchEvent(new Event('change'));
+            } else {
+                console.log(`Model ${modelToSet} not found in dropdown options`);
+                // Still store in context even if not in dropdown
+                window.vehicleContext.model = modelToSet;
+            }
         }
     }
 }); 

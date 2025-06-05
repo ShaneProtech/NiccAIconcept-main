@@ -94,17 +94,4 @@
 /* Rotated thumbtack for pinned items */
 .chat-item.pinned .chat-action-btn.pin-btn .fa-thumbtack {
     transform: rotate(45deg);
-}
-
-/* Style for the pin button */
-.pin-button {
-    /* These styles will be removed */
-}
-
-.pin-button:hover {
-    /* These styles will be removed */
-}
-
-.pin-button.pinned {
-    /* These styles will be removed */
 } 

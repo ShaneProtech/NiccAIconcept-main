@@ -405,68 +405,28 @@ document.addEventListener('DOMContentLoaded', () => {
             // Set this as the active chat in localStorage
             localStorage.setItem('activeChatId', chatId);
             
-            // If it's a new chat, we don't need to fetch messages
-            if (!document.querySelector(`.chat-item[data-chat-id="${chatId}"]`)) {
-                console.log("This appears to be a new chat, skipping message fetch");
-                
-                // Clear the messages container
-                const messagesContainer = document.getElementById('messages');
-                messagesContainer.innerHTML = '';
-                
-                // Add a welcome message
-                const welcomeMessage = document.createElement('div');
-                welcomeMessage.className = 'message assistant-message markdown-content';
-                welcomeMessage.innerHTML = marked.parse("Hello! I'm Nicc AI, your ADAS calibration assistant. How can I help you today?");
-                messagesContainer.appendChild(welcomeMessage);
-                
-                return;
-            }
+            // Show loading indicator in chat area
+            const messagesContainer = document.getElementById('messages');
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.className = 'message assistant-message loading-message';
+            loadingIndicator.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+            messagesContainer.innerHTML = '';
+            messagesContainer.appendChild(loadingIndicator);
             
-            // Fetch chat messages from the API
-            const response = await fetch(`/api/chats/${chatId}`);
+            // Use socket.emit to request chat history - this is the correct method
+            console.log(`Emitting select_chat event for chat: ${chatId}`);
+            socket.emit('select_chat', { chat_id: chatId });
             
-            if (!response.ok) {
-                throw new Error('Failed to fetch chat messages');
-            }
-            
-            const data = await response.json();
-            console.log("Retrieved messages:", data);
-            
-            if (data.success) {
-                // Clear the messages container
-                const messagesContainer = document.getElementById('messages');
-                messagesContainer.innerHTML = '';
-                
-                // Add each message to the UI
-                if (data.messages && data.messages.length > 0) {
-                    data.messages.forEach(msg => {
-                        const messageDiv = document.createElement('div');
-                        messageDiv.className = `message ${msg.role === 'user' ? 'user-message' : 'assistant-message'}`;
-                        
-                        if (msg.role === 'assistant') {
-                            messageDiv.classList.add('markdown-content');
-                            messageDiv.innerHTML = marked.parse(msg.content);
-                        } else {
-                            messageDiv.textContent = msg.content;
-                        }
-                        
-                        messagesContainer.appendChild(messageDiv);
-                    });
-                    
-                    // Scroll to the bottom of the messages
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                } else {
-                    // No messages, add a welcome message
-                    const welcomeMessage = document.createElement('div');
-                    welcomeMessage.className = 'message assistant-message markdown-content';
-                    welcomeMessage.innerHTML = marked.parse("Hello! I'm Nicc AI, your ADAS calibration assistant. How can I help you today?");
-                    messagesContainer.appendChild(welcomeMessage);
-                }
-            } else {
-                console.error('Error retrieving chat messages:', data.error);
-            }
+            // The response will be handled by the socket.on('chat_history') handler
         } catch (error) {
             console.error('Error selecting chat:', error);
+            // Show error message to user
+            const messagesContainer = document.getElementById('messages');
+            messagesContainer.innerHTML = '';
+            const errorMessage = document.createElement('div');
+            errorMessage.className = 'message system-message error';
+            errorMessage.textContent = `Failed to load conversation history: ${error.message || 'Unknown error'}`;
+            messagesContainer.appendChild(errorMessage);
         }
     }
     
@@ -501,11 +461,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     async function deleteChat(chatId) {
-        if (!confirm('Delete this conversation? This action cannot be undone.')) {
+        if (!confirm('Delete this conversation and all its messages? This action cannot be undone.')) {
             return;
         }
         
         try {
+            console.log(`Deleting chat ${chatId} and all its messages...`);
+            
+            // Show loading state
+            showChatLoadingState();
+            
             const response = await fetch(`/api/chats/${chatId}/delete`, {
                 method: 'DELETE'
             });
@@ -516,36 +481,52 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const data = await response.json();
             if (data.success) {
-                // Remove chat from list
-                const chatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
-                if (chatItem) {
-                    chatItem.remove();
+                console.log(`Successfully deleted chat ${chatId} and all its messages`);
+                
+                // Clear the chat area if this was the active chat
+                const activeId = localStorage.getItem('activeChatId');
+                if (activeId === chatId) {
+                    // Clear messages container
+                    const messagesContainer = document.getElementById('messages-container');
+                    if (messagesContainer) {
+                        messagesContainer.innerHTML = '';
+                    }
+                    
+                    // Remove active chat ID from localStorage
+                    localStorage.removeItem('activeChatId');
                 }
+                
+                // Completely refresh the chat list
+                await fetchChats();
                 
                 // Check if there are any remaining chats
                 const remainingChats = document.querySelectorAll('.chat-item').length;
                 
                 if (remainingChats === 0) {
                     // Only create a new chat if there are no chats left AND this was the active chat
-                    const activeId = localStorage.getItem('activeChatId');
                     if (activeId === chatId) {
                         console.log('No chats left and active chat was deleted, creating new one');
                         createNewChat();
                     }
-                } else {
-                    // If there are remaining chats, select the first one
+                } else if (activeId === chatId) {
+                    // If the active chat was deleted, select the first one
                     const firstChatItem = document.querySelector('.chat-item');
                     if (firstChatItem) {
                         console.log('Selecting first available chat');
-                        selectChat(firstChatItem.dataset.chatId);
+                        selectChat(firstChatItem.getAttribute('data-chat-id'));
                     }
                 }
                 
                 // Update empty state
                 updateEmptyState();
+            } else {
+                console.error('Failed to delete chat:', data.error);
             }
         } catch (error) {
             console.error('Error deleting chat:', error);
+        } finally {
+            // Hide loading state
+            hideLoadingState();
         }
     }
     
@@ -555,7 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`Toggling pin status for chat: ${chatId}`);
             
             // Get the chat item
-            const chatItem = document.querySelector(`.chat-item[data-id="${chatId}"]`);
+            const chatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
             if (!chatItem) {
                 console.error(`Could not find chat item with ID: ${chatId}`);
                 return;
@@ -581,30 +562,11 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('Pin toggle response:', data);
             
             if (data.success) {
-                // Update the UI based on the new pinned state
-                if (data.is_pinned) {
-                    chatItem.classList.add('pinned');
-                    const pinBtn = chatItem.querySelector('.chat-action-btn.pin-btn');
-                    if (pinBtn) {
-                        pinBtn.classList.add('pinned');
-                        pinBtn.querySelector('i').className = 'fas fa-thumbtack';
-                        pinBtn.title = 'Unpin chat';
-                    }
-                } else {
-                    chatItem.classList.remove('pinned');
-                    const pinBtn = chatItem.querySelector('.chat-action-btn.pin-btn');
-                    if (pinBtn) {
-                        pinBtn.classList.remove('pinned');
-                        pinBtn.querySelector('i').className = 'fas fa-thumbtack';
-                        pinBtn.title = 'Pin chat';
-                    }
-                }
-                
-                // Refresh the chat list to update the order
+                // Instead of updating the individual chat item,
+                // completely refresh the chat list to ensure proper organization
+                // of pinned and unpinned chats with separators
+                console.log("Refreshing entire chat list to reflect pin status change");
                 await fetchChats();
-                
-                // Update the pinned separator visibility
-                updatePinnedSeparator();
             } else {
                 console.error('Error toggling pin status:', data.error);
             }
@@ -789,12 +751,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         if (!hasChats && !emptyMessage) {
+            // No chats exist yet - show empty message in sidebar
             const newEmptyMessage = document.createElement('div');
             newEmptyMessage.className = 'empty-chats-message';
             newEmptyMessage.innerHTML = '<p>No conversations yet</p><p>Click "New Chat" to start a conversation with NICC</p>';
             chatList.appendChild(newEmptyMessage);
             
-            // Also add a welcome message to the main chat area
+            // Only show a welcome message in the chat area if there are NO chats
             if (messagesContainer) {
                 const welcomeMessage = document.createElement('div');
                 welcomeMessage.className = 'message assistant-message welcome-message';
@@ -802,7 +765,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 messagesContainer.appendChild(welcomeMessage);
             }
         } else if (hasChats && emptyMessage) {
+            // Remove empty message from sidebar if we have chats
             emptyMessage.remove();
+            
+            // Keep chat area empty when there are chats but none selected
+            if (messagesContainer) {
+                messagesContainer.innerHTML = '';
+            }
         }
     }
     
@@ -851,26 +820,126 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Socket.io event handlers for chat management
     socket.on('connect', () => {
+        console.log("Socket connected, fetching chats...");
+        
         // Fetch chats when connected
         fetchChats().then(chats => {
-            // Only select a chat if it exists - don't auto-create
+            console.log(`Fetched ${chats.length} chats`);
+            
+            // Get active chat ID from localStorage if available
+            const savedActiveChatId = localStorage.getItem('activeChatId');
+            console.log(`Active chat ID from localStorage: ${savedActiveChatId}`);
+            
             if (chats.length > 0) {
-                // Select the most recent chat (first in the list)
-                const mostRecentChatId = chats[0].chat_id;
-                if (mostRecentChatId) {
-                    selectChat(mostRecentChatId);
+                // First try to identify the previously active chat from localStorage
+                if (savedActiveChatId) {
+                    // Check if the saved chat ID exists in the fetched chats
+                    const savedChatExists = chats.some(chat => chat.chat_id === savedActiveChatId);
+                    
+                    if (savedChatExists) {
+                        console.log(`Found previously active chat: ${savedActiveChatId}`);
+                        
+                        // Just update the UI to show this chat as selected
+                        const chatItems = document.querySelectorAll('.chat-item');
+                        chatItems.forEach(item => {
+                            if (item.dataset.chatId === savedActiveChatId) {
+                                item.classList.add('active');
+                            } else {
+                                item.classList.remove('active');
+                            }
+                        });
+                        
+                        // Keep the active chat ID in localStorage
+                        localStorage.setItem('activeChatId', savedActiveChatId);
+                        
+                        // IMPORTANT FIX: Automatically request the chat history for the active chat
+                        console.log(`Requesting chat history for active chat: ${savedActiveChatId}`);
+                        
+                        // Show loading indicator
+                        const messagesContainer = document.getElementById('messages');
+                        if (messagesContainer) {
+                            const loadingIndicator = document.createElement('div');
+                            loadingIndicator.className = 'message assistant-message loading-message';
+                            loadingIndicator.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                            messagesContainer.innerHTML = '';
+                            messagesContainer.appendChild(loadingIndicator);
+                        }
+                        
+                        // Emit select_chat event to load the chat history
+                        socket.emit('select_chat', { chat_id: savedActiveChatId });
+                    } else {
+                        // If the saved chat doesn't exist, mark the most recent chat as active
+                        console.log(`Saved chat ${savedActiveChatId} not found, marking most recent as active`);
+                        const mostRecentChatId = chats[0].chat_id;
+                        
+                        // Update local storage with new active chat
+                        localStorage.setItem('activeChatId', mostRecentChatId);
+                        
+                        // Update UI to show the most recent chat as selected
+                        const chatItems = document.querySelectorAll('.chat-item');
+                        chatItems.forEach(item => {
+                            if (item.dataset.chatId === mostRecentChatId) {
+                                item.classList.add('active');
+                            } else {
+                                item.classList.remove('active');
+                            }
+                        });
+                        
+                        // IMPORTANT FIX: Automatically request the chat history for the most recent chat
+                        console.log(`Requesting chat history for most recent chat: ${mostRecentChatId}`);
+                        
+                        // Show loading indicator
+                        const messagesContainer = document.getElementById('messages');
+                        if (messagesContainer) {
+                            const loadingIndicator = document.createElement('div');
+                            loadingIndicator.className = 'message assistant-message loading-message';
+                            loadingIndicator.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                            messagesContainer.innerHTML = '';
+                            messagesContainer.appendChild(loadingIndicator);
+                        }
+                        
+                        // Emit select_chat event to load the chat history
+                        socket.emit('select_chat', { chat_id: mostRecentChatId });
+                    }
+                } else {
+                    // No active chat in localStorage, mark the most recent as active
+                    console.log(`No active chat in localStorage, marking most recent as active`);
+                    const mostRecentChatId = chats[0].chat_id;
+                    
+                    // Update local storage
                     localStorage.setItem('activeChatId', mostRecentChatId);
+                    
+                    // Update UI to show the most recent chat as selected
+                    const chatItems = document.querySelectorAll('.chat-item');
+                    chatItems.forEach(item => {
+                        if (item.dataset.chatId === mostRecentChatId) {
+                            item.classList.add('active');
+                        } else {
+                            item.classList.remove('active');
+                        }
+                    });
+                    
+                    // Clear the chat area - no welcome message, just empty until a chat is selected
+                    const messagesContainer = document.getElementById('messages');
+                    if (messagesContainer) {
+                        messagesContainer.innerHTML = '';
+                    }
                 }
             } else {
-                // No chats exist yet, but don't create one automatically
-                // Instead, show an empty state that prompts the user to create a new chat
+                // No chats exist yet, show an empty state
+                console.log("No chats found, showing empty state");
                 updateEmptyState();
             }
+        }).catch(error => {
+            console.error("Error fetching chats:", error);
+            updateEmptyState();
         });
     });
     
     // Handle chat selection response
     socket.on('chat_history', (data) => {
+        console.log('Received chat history in main.js:', data);
+        
         // Remove any loading messages
         const loadingMessages = document.querySelectorAll('.loading-message');
         loadingMessages.forEach(msg => msg.remove());
@@ -879,6 +948,73 @@ document.addEventListener('DOMContentLoaded', () => {
         const chatId = data.chat_id;
         if (chatId) {
             localStorage.setItem('activeChatId', chatId);
+            
+            // Update the UI to show this chat as selected
+            const chatItems = document.querySelectorAll('.chat-item');
+            chatItems.forEach(item => {
+                if (item.dataset.chatId === chatId) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+            
+            // Now process the chat messages
+            const messagesContainer = document.getElementById('messages');
+            if (messagesContainer) {
+                // First clear any existing messages
+                messagesContainer.innerHTML = '';
+                
+                // Add messages from history
+                if (data.messages && data.messages.length > 0) {
+                    console.log(`Processing ${data.messages.length} messages from chat history`);
+                    
+                    data.messages.forEach(msg => {
+                        // Create a message div
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = `message ${msg.role === 'user' ? 'user-message' : 'assistant-message'}`;
+                        
+                        // Process content based on role
+                        if (msg.role === 'assistant') {
+                            // Check if content is HTML
+                            const isHTML = (msg.content && (
+                                msg.content.startsWith('<div class="calibration-results">') ||
+                                msg.content.includes('<table') ||
+                                msg.content.includes('<h2>') ||
+                                msg.content.startsWith('<div')
+                            ));
+                            
+                            if (isHTML) {
+                                // Direct HTML content
+                                messageDiv.innerHTML = msg.content || '';
+                            } else {
+                                // Markdown content
+                                messageDiv.classList.add('markdown-content');
+                                messageDiv.innerHTML = marked.parse(msg.content || '');
+                            }
+                        } else {
+                            // User message - just use text
+                            messageDiv.textContent = msg.content || '';
+                        }
+                        
+                        // Add to container
+                        messagesContainer.appendChild(messageDiv);
+                    });
+                    
+                    // Scroll to bottom
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    
+                    // Apply any needed styling to tables
+                    setTimeout(enhanceTableStyling, 100);
+                } else {
+                    console.log('No messages in history, showing welcome message');
+                    // No messages in history, show welcome message
+                    const welcomeMessage = document.createElement('div');
+                    welcomeMessage.className = 'message assistant-message markdown-content';
+                    welcomeMessage.innerHTML = marked.parse("Hello! I'm Nicc AI, your ADAS calibration assistant. How can I help you today?");
+                    messagesContainer.appendChild(welcomeMessage);
+                }
+            }
         }
     });
     
@@ -939,7 +1075,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendButton = document.querySelector('.send-button');
     const messages = document.getElementById('messages');
     
-    // Create a function to show loading indicators
+    // Create a function to show loading indicators for messages
     function showLoadingState() {
         // 1. Add loading indicator to send button
         const buttonLoadingIndicator = document.createElement('span');
@@ -954,6 +1090,39 @@ document.addEventListener('DOMContentLoaded', () => {
         messages.scrollTop = messages.scrollHeight;
         
         return { buttonIndicator: buttonLoadingIndicator, messageIndicator: loadingMessage };
+    }
+    
+    // Create a function to show loading state in the chat area
+    function showChatLoadingState() {
+        // Add loading class to chat area
+        const chatArea = document.querySelector('.chat-area');
+        if (chatArea) {
+            chatArea.classList.add('loading');
+            
+            // Add loading indicator if it doesn't exist
+            let loadingIndicator = chatArea.querySelector('.loading-indicator');
+            if (!loadingIndicator) {
+                loadingIndicator = document.createElement('div');
+                loadingIndicator.className = 'loading-indicator';
+                loadingIndicator.innerHTML = '<div class="spinner"></div><p>Loading...</p>';
+                chatArea.appendChild(loadingIndicator);
+            }
+        }
+    }
+    
+    // Create a function to hide loading state in the chat area
+    function hideLoadingState() {
+        // Remove loading class from chat area
+        const chatArea = document.querySelector('.chat-area');
+        if (chatArea) {
+            chatArea.classList.remove('loading');
+            
+            // Remove loading indicator if it exists
+            const loadingIndicator = chatArea.querySelector('.loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.remove();
+            }
+        }
     }
     
     // Add loading indicator when sending message
@@ -1080,7 +1249,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         // Check if this chat already exists in the sidebar
-        const existingChatItem = document.querySelector(`.chat-item[data-id="${chat.chat_id}"]`);
+        const existingChatItem = document.querySelector(`.chat-item[data-chat-id="${chat.chat_id}"]`);
         if (existingChatItem) {
             console.log(`Chat ${chat.chat_id} already exists in sidebar, updating it`);
             
@@ -1126,7 +1295,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Create a new chat item
         const chatItem = document.createElement('div');
         chatItem.className = `chat-item${chat.is_active ? ' active' : ''}${chat.is_pinned ? ' pinned' : ''}`;
-        chatItem.setAttribute('data-id', chat.chat_id);
+        chatItem.setAttribute('data-chat-id', chat.chat_id);
         
         // Create chat icon
         const chatIcon = document.createElement('div');
@@ -1200,5 +1369,74 @@ document.addEventListener('DOMContentLoaded', () => {
         // Add to the chat list
         chatsList.appendChild(chatItem);
         console.log(`Added chat ${chat.chat_id} to sidebar`);
+    }
+
+    // Find the sendMessage function and update it to prioritize text-extracted year
+    function sendMessage(message = null) {
+        // Get the user's message from the input field if not provided
+        if (!message) {
+            message = userInput.value.trim();
+            // Clear the input field
+            userInput.value = '';
+        }
+        
+        // Don't send empty messages
+        if (!message || message === '') {
+            return;
+        }
+        
+        // Store vehicle context (for display and submission)
+        let vehicleContextToSend = Object.assign({}, window.vehicleContext || {});
+        
+        // First analyze the message for vehicle information
+        const textExtractedVehicle = extractVehicleFromText(message);
+        console.log("Text extracted vehicle info:", textExtractedVehicle);
+        
+        // Important: If a year was explicitly mentioned in the text, it should override
+        // the dropdown value since this is the most recent user intent
+        if (textExtractedVehicle.year && textExtractedVehicle.hasVehicle) {
+            console.log("Using year explicitly mentioned in text:", textExtractedVehicle.year);
+            vehicleContextToSend.year = textExtractedVehicle.year;
+            vehicleContextToSend.yearFromText = true;
+        }
+        
+        // Similarly, prioritize make and model from text if present
+        if (textExtractedVehicle.make && textExtractedVehicle.hasVehicle) {
+            console.log("Using make explicitly mentioned in text:", textExtractedVehicle.make);
+            vehicleContextToSend.make = textExtractedVehicle.make;
+            vehicleContextToSend.makeFromText = true;
+            
+            // If make changes, we need to ensure any model extracted is still sent
+            if (textExtractedVehicle.model) {
+                console.log("Ensuring model from text is preserved with make change:", textExtractedVehicle.model);
+                vehicleContextToSend.model = textExtractedVehicle.model;
+                vehicleContextToSend.modelFromText = true;
+            }
+        }
+        
+        if (textExtractedVehicle.model && textExtractedVehicle.hasVehicle) {
+            console.log("Using model explicitly mentioned in text:", textExtractedVehicle.model);
+            vehicleContextToSend.model = textExtractedVehicle.model;
+            vehicleContextToSend.modelFromText = true;
+        }
+        
+        // Log the final context being sent
+        console.log("Sending message with vehicleContext:", JSON.stringify(vehicleContextToSend));
+        
+        // Display the user's message in the chat
+        addMessage(message, 'user');
+        
+        // Add typing indicator while waiting for response
+        addTypingIndicator();
+        
+        // Get current chat ID or use default
+        const chat_id = currentChatId || null;
+        
+        // Emit socket event with message and chat ID
+        socket.emit('message', {
+            message: message,
+            chat_id: chat_id,
+            vehicleContext: vehicleContextToSend
+        });
     }
 }); 

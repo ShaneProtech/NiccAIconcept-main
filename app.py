@@ -15,6 +15,24 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 import requests
 from db_supabase import SupabaseHelper  # Add Supabase helper import
 
+# Import spaCy for NLP processing
+try:
+    import spacy  # type: ignore # pyright: ignore[reportMissingImports]
+    # Try to load the English model
+    try:
+        nlp = spacy.load("en_core_web_sm")
+        HAS_SPACY = True
+        print("Successfully loaded spaCy model for NLP processing")
+    except OSError:
+        # If the model isn't installed, use a simple fallback
+        print("SpaCy model not found. Using basic language processing instead.")
+        nlp = None
+        HAS_SPACY = False
+except ImportError:
+    print("SpaCy not installed. Using basic language processing instead.")
+    nlp = None
+    HAS_SPACY = False
+
 # Debug helper functions
 def debug_database_info():
     """Gather debug information about tables and columns in the database"""
@@ -442,12 +460,15 @@ def extract_vehicle_info(message):
 # Function to query vehicle information from database
 def query_vehicle_database(make, model, year=None):
     """Query the database for vehicle information using a flexible approach"""
+    print(f"DEBUG: Vehicle query wrapper called with Year: '{year}', Make: '{make}', Model: '{model}'")
+    print(f"DEBUG: Year parameter type: {type(year)}")
     return db_helper.query_vehicle_database(make, model, year)
 
 def handle_vehicle_info_query(message):
     """Handle queries about general vehicle information"""
     vehicle_info = extract_vehicle_info(message)
     
+    # Empty vehicle_info structure would mean nothing was found at all
     if not vehicle_info:
         return "I couldn't identify a specific vehicle in your message. Could you provide the make, model, and year of the vehicle you're asking about?"
     
@@ -467,6 +488,15 @@ def handle_vehicle_info_query(message):
     
     print(f"Processing vehicle info query for: '{make}' '{model}' '{year}', collision area: '{collision_area}'")
     
+    # Check for incomplete information
+    missing_info = []
+    if not make:
+        missing_info.append("make")
+    if not model:
+        missing_info.append("model")
+    if not year:
+        missing_info.append("year")
+    
     # Check if asking about production years
     year_keywords = ['what years', 'years made', 'production years', 'when was', 'how long', 'still made', 'discontinued']
     query_type = "years" if any(keyword in message.lower() for keyword in year_keywords) else "general"
@@ -483,7 +513,11 @@ def handle_vehicle_info_query(message):
         else:
             table_format = "general"
     
-    # Try the database first
+    # If we have missing information, call the fallback function with the missing info
+    if missing_info:
+        return provide_vehicle_info(make, model, year, query_type, wants_table, table_format, missing_info=missing_info)
+    
+    # Try the database first if we have all the needed information
     try:
         # Use our helper function to query the database
         result = query_vehicle_database(make, model, year)
@@ -500,12 +534,16 @@ def handle_vehicle_info_query(message):
             else:
                 # Check if the query is about a collision or if we should display all components
                 if any(word in message.lower() for word in ['hit', 'impact', 'collision', 'crash', 'accident', 'damage', 'front', 'rear', 'side']) or 'components' in message.lower() or 'all' in message.lower():
+                    # Get all systems for this vehicle - treat "all components" as a special case
+                    all_systems = ["All Systems"] if 'components' in message.lower() or 'all' in message.lower() else None
                     # Return formatted calibration info with collision area
-                    return format_calibration_info(result["data"], vehicle_info.get('component'), collision_area)
+                    return format_calibration_info(result["data"], vehicle_info.get('component'), collision_area, all_systems=all_systems, requested_year=year)
                 
                 # For general vehicle info, return information about ALL components
                 print(f"DEBUG: Displaying all component information for vehicle {make} {model} {year}")
-                return format_calibration_info(result["data"], vehicle_info.get('component'), None)
+                # Default to "All Systems" for general vehicle info
+                all_systems = ["All Systems"]
+                return format_calibration_info(result["data"], vehicle_info.get('component'), None, all_systems=all_systems, requested_year=year)
                 
         # If we get here, we don't have database info for this vehicle
         # Fall back to provide_vehicle_info function
@@ -571,7 +609,7 @@ def index():
 def serve_static(path):
     return send_from_directory('static', path)
 
-def format_calibration_info(results, selected_system=None, collision_area=None, all_systems=None):
+def format_calibration_info(results, selected_system=None, collision_area=None, all_systems=None, requested_year=None):
     """Format calibration information in clean Markdown structure.
     
     Args:
@@ -579,13 +617,48 @@ def format_calibration_info(results, selected_system=None, collision_area=None, 
         selected_system: Optional primary system to filter results by
         collision_area: Optional collision area to filter results by (front, rear, side)
         all_systems: Optional list of systems to include in the results (overrides selected_system)
+        requested_year: Optional originally requested year that might differ from the data
     """
     print(f"DEBUG: Formatting calibration info with selected_system='{selected_system}', collision_area='{collision_area}', all_systems={all_systems}")
     systems = {}
     
+    # Check if results include a note about using non-exact year match
+    has_fallback_note = False
+    fallback_note = ""
+    original_results = results  # Save the original results object
+    
+    # Handle the case where results is a dictionary with data and note
+    if isinstance(results, dict):
+        if 'note' in results:
+            has_fallback_note = True
+            fallback_note = results.get('note', '')
+        
+        # Update results to just the data array
+        if 'data' in results:
+            results = results.get('data', [])
+        # If 'data' isn't present but 'found' is, this might be the entire results object
+        elif 'found' in results:
+            print(f"DEBUG: Results object has 'found' but no 'data'. Using original object.")
+            results = original_results
+    
+    # Ensure results is iterable before proceeding
+    if not isinstance(results, list):
+        print(f"DEBUG: Results is not a list: {type(results)}. Converting to list.")
+        if isinstance(results, dict):
+            # If it's still a dict at this point, it might be a single result
+            results = [results]
+        else:
+            # If it's something else entirely, return an error message
+            return f"Error: Unable to process results of type {type(results)}"
+    
     # Format years to remove decimals
     if results and len(results) > 0:
         for row in results:
+            # Skip non-dict rows
+            if not isinstance(row, dict):
+                print(f"DEBUG: Skipping non-dict row: {row}")
+                continue
+                
             if 'year' in row and row['year']:
                 try:
                     # Remove decimal from year if present
@@ -598,6 +671,11 @@ def format_calibration_info(results, selected_system=None, collision_area=None, 
     
     # First pass: Collect only actual systems (cameras, radars, sensors)
     for row in results:
+        # Skip non-dict rows
+        if not isinstance(row, dict):
+            print(f"DEBUG: Skipping non-dict row during system collection: {row}")
+            continue
+            
         component = row.get('parent_component', '')
         cal_type = row.get('calibration_type', '')
         
@@ -665,6 +743,11 @@ def format_calibration_info(results, selected_system=None, collision_area=None, 
     
     # For each row, check if it's a requirement and add it to the appropriate system
     for row in results:
+        # Skip non-dict rows
+        if not isinstance(row, dict):
+            print(f"DEBUG: Skipping non-dict row during requirements collection: {row}")
+            continue
+            
         component = row.get('parent_component', '')
         
         # Skip if this is a main system row or invalid component
@@ -699,9 +782,24 @@ def format_calibration_info(results, selected_system=None, collision_area=None, 
     
     # Get vehicle info from first result
     if results and len(results) > 0:
-        year = results[0].get('year', '')
-        make = results[0].get('make', '')
-        model = results[0].get('model', '')
+        # Ensure first row is a dict
+        first_row = results[0]
+        if not isinstance(first_row, dict):
+            print(f"DEBUG: First row is not a dict: {first_row}")
+            # Try to find the first dict row
+            for row in results:
+                if isinstance(row, dict):
+                    first_row = row
+                    break
+            else:
+                # If no dict rows found, use empty values
+                first_row = {}
+        
+        year = first_row.get('year', '')
+        make = first_row.get('make', '')
+        model = first_row.get('model', '')
+        
+        print(f"DEBUG: Vehicle info from results - Year: '{year}', Make: '{make}', Model: '{model}'")
         
         # Remove decimal point from year if present
         if year and isinstance(year, str) and '.' in year:
@@ -710,6 +808,19 @@ def format_calibration_info(results, selected_system=None, collision_area=None, 
             year = str(int(year))
             
         vehicle = f"{year} {make} {model}"
+        print(f"DEBUG: Final vehicle string for display: '{vehicle}'")
+
+        # If we have a requested year that's different from the data's year, show both
+        if requested_year and str(requested_year) != str(year):
+            print(f"DEBUG: Using data from year {year} to display for requested year {requested_year}")
+            # Save the original vehicle title
+            data_vehicle = vehicle
+            # Create a more descriptive title that includes both years
+            vehicle = f"{requested_year} {make} {model} ADAS Calibration Requirements"
+            # Ensure the fallback note is set
+            if not has_fallback_note:
+                has_fallback_note = True
+                fallback_note = f"Note: Showing data for {data_vehicle} as the closest match for your {requested_year} {make} {model} query."
     else:
         vehicle = "Vehicle"
     
@@ -743,8 +854,16 @@ def format_calibration_info(results, selected_system=None, collision_area=None, 
     # Build response as HTML directly for better table control
     formatted_response = f"""
     <div class="calibration-results">
-      <h2>{vehicle} ADAS Calibration Requirements</h2>
+      <h2>{vehicle}</h2>
     """
+    
+    # Display fallback note if present
+    if has_fallback_note and fallback_note:
+        formatted_response += f"""
+        <div class="alert alert-warning" style="background-color: #fff3cd; color: #856404; padding: 12px; margin: 15px 0; border-radius: 5px; border-left: 5px solid #ffeeba; font-weight: bold;">
+            <strong>⚠️ Important:</strong> {fallback_note}
+        </div>
+        """
     
     # Show info about what's being displayed
     if collision_area:
@@ -929,20 +1048,20 @@ def handle_select_chat(data):
     chat_id = data.get('chat_id')
     
     if not chat_id:
+        print(f"DEBUG: No chat_id provided in select_chat event")
         return
+    
+    print(f"DEBUG: Handling select_chat for {chat_id}")
         
     # Load the chat history
     messages = get_chat_messages(chat_id)
+    print(f"DEBUG: Retrieved {len(messages)} messages for chat {chat_id}")
     
-    # Convert to our internal format
+    # Convert to our internal format for conversation_history
     conversation_history[session_id] = [
         {'role': msg['role'], 'message': msg['content']} 
         for msg in messages
     ]
-    
-    # Extract vehicle context from history
-    last_vehicle_info[session_id] = extract_last_vehicle_from_history(conversation_history[session_id])
-    print(f"DEBUG: Loaded vehicle context from history: {last_vehicle_info[session_id]}")
     
     # Update the session
     session['chat_id'] = chat_id
@@ -952,6 +1071,8 @@ def handle_select_chat(data):
         'messages': messages,
         'chat_id': chat_id
     }, room=session_id)
+    
+    print(f"DEBUG: Sent {len(messages)} messages to client for chat {chat_id}")
 
 def extract_last_vehicle_from_history(history):
     """Extract the most recent vehicle information from conversation history"""
@@ -993,6 +1114,19 @@ def handle_message(data):
         # Get user message and session ID
         user_message = data['message']
         session_id = request.sid
+        
+        # Initialize has_vehicle_in_message variable to prevent UnboundLocalError
+        has_vehicle_in_message = False
+        # Initialize vehicle_info_to_use to prevent UnboundLocalError
+        vehicle_info_to_use = None
+        # Initialize collision_area 
+        collision_area = None
+        # Initialize flags to track source of vehicle information
+        info_from_current_message = {
+            'year': False,
+            'make': False, 
+            'model': False
+        }
         
         # Get chat_id from message data if provided (client-side creation), otherwise use session
         chat_id = data.get('chat_id')
@@ -1063,16 +1197,74 @@ def handle_message(data):
                 'isMarkdown': is_markdown,
                 'isHTML': is_html
             }, room=session_id)
+            
+            return True  # Return success flag to caller
         
-        # If vehicle context was provided through the dropdowns, use it
-        if vehicle_context and any(vehicle_context.get(key) for key in ['year', 'make', 'model']) or vehicle_context.get('systems'):
-            # Override extracted info with dropdown selections
-            current_vehicle_info = {
-                'year': vehicle_context.get('year'),
-                'make': vehicle_context.get('make'),
-                'model': vehicle_context.get('model'),
-                'component': None  # Will be set below based on systems
-            }
+        # First determine if this is a vehicle/ADAS question
+        is_vehicle_question = is_adas_query(user_message)
+        
+        # Extract vehicle information from the current message first
+        message_vehicle_info = extract_vehicle_info(user_message)
+        print(f"DEBUG: Extracted vehicle info from current message: {message_vehicle_info}")
+        
+        # Track if we found vehicle info in this message
+        message_has_vehicle = bool(message_vehicle_info['make'] or message_vehicle_info['model'] or message_vehicle_info['year'])
+        has_vehicle_in_message = message_has_vehicle
+        
+        # Set which vehicle information came from the current message
+        if message_vehicle_info['year']:
+            info_from_current_message['year'] = True
+        if message_vehicle_info['make']:
+            info_from_current_message['make'] = True
+        if message_vehicle_info['model']:
+            info_from_current_message['model'] = True
+            
+        # Create a vehicle info object that will be used, starting with message extraction
+        current_vehicle_info = {
+            'year': message_vehicle_info['year'],
+            'make': message_vehicle_info['make'],
+            'model': message_vehicle_info['model'],
+            'component': message_vehicle_info['component'],
+            'all_systems': []
+        }
+        
+        # Now handle dropdown context - only using it for fields not found in message
+        if vehicle_context and (any(vehicle_context.get(key) for key in ['year', 'make', 'model']) or vehicle_context.get('systems')):
+            print(f"DEBUG: Processing vehicle context from dropdowns")
+            
+            # Check for explicit flags indicating text-extracted values
+            year_from_text = vehicle_context.get('yearFromText', False)
+            make_from_text = vehicle_context.get('makeFromText', False)
+            model_from_text = vehicle_context.get('modelFromText', False)
+            
+            # Only use dropdown values for fields not found in the message
+            # Note: text extraction in frontend has priority over our backend extraction
+            if not current_vehicle_info['year'] or not info_from_current_message['year']:
+                if year_from_text:
+                    print(f"DEBUG: Using year explicitly mentioned in text (from frontend): {vehicle_context.get('year')}")
+                    current_vehicle_info['year'] = vehicle_context.get('year')
+                    info_from_current_message['year'] = True
+                elif vehicle_context.get('year'):
+                    current_vehicle_info['year'] = vehicle_context.get('year')
+                    print(f"DEBUG: Using year from previous context: {current_vehicle_info['year']}")
+            
+            if not current_vehicle_info['make'] or not info_from_current_message['make']:
+                if make_from_text:
+                    print(f"DEBUG: Using make explicitly mentioned in text (from frontend): {vehicle_context.get('make')}")
+                    current_vehicle_info['make'] = vehicle_context.get('make')
+                    info_from_current_message['make'] = True
+                elif vehicle_context.get('make'):
+                    current_vehicle_info['make'] = vehicle_context.get('make')
+                    print(f"DEBUG: Using make from previous context: {current_vehicle_info['make']}")
+            
+            if not current_vehicle_info['model'] or not info_from_current_message['model']:
+                if model_from_text:
+                    print(f"DEBUG: Using model explicitly mentioned in text (from frontend): {vehicle_context.get('model')}")
+                    current_vehicle_info['model'] = vehicle_context.get('model')
+                    info_from_current_message['model'] = True
+                elif vehicle_context.get('model'):
+                    current_vehicle_info['model'] = vehicle_context.get('model')
+                    print(f"DEBUG: Using model from previous context: {current_vehicle_info['model']}")
             
             # Handle multiple systems
             if vehicle_context.get('systems') and len(vehicle_context.get('systems')) > 0:
@@ -1091,11 +1283,8 @@ def handle_message(data):
                     elif systems:
                         current_vehicle_info['component'] = systems[0]
             
-            print(f"DEBUG: Using vehicle context from dropdowns: {current_vehicle_info}")
-            
             # Check for POI information in the vehicle context
             poi_areas = vehicle_context.get('poi_areas', [])
-            collision_area = None
             
             # Determine primary collision area if POIs are selected
             if poi_areas:
@@ -1111,29 +1300,32 @@ def handle_message(data):
                     collision_area = poi_areas[0]  # Use the first one if none of the priority areas
                 
                 print(f"DEBUG: Primary collision area determined: {collision_area}")
+        
+        # Update has_vehicle_in_message based on the combined info
+        has_vehicle_in_message = bool(current_vehicle_info['make'] or current_vehicle_info['model'] or current_vehicle_info['year'])
+        
+        # Set vehicle_info_to_use to prevent UnboundLocalError
+        vehicle_info_to_use = current_vehicle_info
+        
+        # Store the combined info in last_vehicle_info
+        last_vehicle_info[session_id] = current_vehicle_info
+        print(f"DEBUG: Updated vehicle context: {current_vehicle_info}")
+        print(f"DEBUG: Info sources - Year from message: {info_from_current_message['year']}, Make from message: {info_from_current_message['make']}, Model from message: {info_from_current_message['model']}")
+        
+        # If the user is asking about the vehicle, use the vehicle context to respond
+        if is_vehicle_question:
+            make = current_vehicle_info['make']
+            model = current_vehicle_info['model']
+            year = current_vehicle_info['year']
             
-            # Store in last_vehicle_info
-            last_vehicle_info[session_id] = current_vehicle_info
+            print(f"DEBUG: Vehicle query with Year: '{year}', Make: '{make}', Model: '{model}'")
             
-            # Since vehicle info is from dropdown, we'll consider it equivalent to having vehicle in message
-            has_vehicle_in_message = True
+            # Get primary system for database query
+            system = current_vehicle_info['component']
             
-            # If the user is asking about the vehicle but didn't mention it in the message,
-            # we can use the vehicle context to respond directly
-            if is_adas_query(user_message) or any(term in user_message.lower() for term in [
-                "calibration", "adas", "system", "camera", "radar", "sensor", "requirements",
-                "what does it have", "tell me about", "information", "specs", "details"
-            ]):
-                make = current_vehicle_info['make']
-                model = current_vehicle_info['model']
-                year = current_vehicle_info['year']
-                
-                # Get primary system for database query
-                system = current_vehicle_info['component']
-                
-                # Store all selected systems for potential multi-system query
-                all_systems = current_vehicle_info.get('all_systems', [system] if system else [])
-            
+            # Store all selected systems for potential multi-system query
+            all_systems = current_vehicle_info.get('all_systems', [system] if system else [])
+        
             # Check for collision area mentions in the message if not already determined from POI
             if not collision_area:
                 user_message_lower = user_message.lower()
@@ -1152,57 +1344,98 @@ def handle_message(data):
                     collision_area = 'side'
                     print(f"DEBUG: Detected side collision area from query: '{user_message}'")
             
-            if make and model:
+            # Check for incomplete information
+            missing_info = []
+            if not make:
+                missing_info.append("make")
+            if not model:
+                missing_info.append("model")
+            if not year:
+                missing_info.append("year")
+            
+            # Add transparency about assumed information
+            assumed_info = []
+            if make and not info_from_current_message['make']:
+                assumed_info.append(f"make ({make})")
+            if model and not info_from_current_message['model']:
+                assumed_info.append(f"model ({model})")
+            if year and not info_from_current_message['year']:
+                assumed_info.append(f"year ({year})")
+            
+            # Check if asking about production years
+            year_keywords = ['what years', 'years made', 'production years', 'when was', 'how long', 'still made', 'discontinued']
+            query_type = "years" if any(keyword in user_message.lower() for keyword in year_keywords) else "general"
+            
+            # Check if user wants a table format
+            wants_table = any(keyword in user_message.lower() for keyword in ['table', 'chart', 'tabular', 'spreadsheet', 'list of', 'make a table', 'create a table'])
+            table_format = None
+            
+            if wants_table:
+                if any(word in user_message.lower() for word in ['calibration', 'requirements', 'prerequisites']):
+                    table_format = "calibration"
+                elif any(word in user_message.lower() for word in ['hit', 'impact', 'collision', 'crash', 'accident', 'damage']):
+                    table_format = "impact"
+                else:
+                    table_format = "general"
+                
+            if make or model:
                 # Try database lookup
+                print(f"DEBUG: Performing database lookup with Year: '{year}', Make: '{make}', Model: '{model}'")
                 result = query_vehicle_database(make, model, year)
                 
                 if result["found"]:
-                    # Format response with calibration info, filtering by selected system and/or collision area
-                    response = format_calibration_info(result["data"], system, collision_area, all_systems)
-                    print(f"DEBUG: Sending HTML calibration info: {response[:100]}...")
-                    # Always set is_markdown=False for calibration HTML
-                    send_response(response, is_markdown=False)
+                    print(f"DEBUG: Found vehicle data in database. Data year: {result['data'][0].get('year') if result['data'] else 'unknown'}")
+                    
+                    # Add a note about assumed information if needed
+                    if assumed_info:
+                        assumed_note = f"Note: I'm using the {', '.join(assumed_info)} from your previous query, as you didn't specify this in your current question."
+                        # Add the note to the result
+                        if isinstance(result, dict) and 'note' not in result:
+                            result = {"data": result["data"], "found": True, "note": assumed_note}
+                        
+                    # Format response with calibration info - pass all_systems parameter
+                    response = format_calibration_info(result["data"], vehicle_info_to_use.get('component'), collision_area, all_systems=all_systems, requested_year=year)
+                    send_response(response, is_markdown=False)  # Send as HTML for better formatting
                     return
                 else:
-                    # Log the issue for debugging
-                    print(f"DEBUG: Vehicle not found in database despite dropdown selection: {make} {model} {year}")
-                    # Try a more flexible search without the year constraint
+                    # Try a more flexible search without year constraint
                     if year:
-                        print(f"DEBUG: Trying again without year constraint")
+                        print(f"DEBUG: Trying ADAS request again without year constraint for {make} {model}")
                         result = query_vehicle_database(make, model, None)
                         if result["found"]:
-                            response = format_calibration_info(result["data"], system, collision_area, all_systems)
-                            send_response(response, is_markdown=False)  # Send as HTML for better formatting
+                            print(f"DEBUG: Found vehicle with flexible year search. Data year: {result['data'][0].get('year') if result['data'] else 'unknown'}")
+                            
+                            # Build note combining year flexibility and assumed information
+                            note_parts = []
+                            if assumed_info:
+                                note_parts.append(f"I'm using the {', '.join(assumed_info)} from your previous query, as you didn't specify this in your current question.")
+                            
+                            note_parts.append(f"I couldn't find specific information for a {year} {make} {model}, so I'm showing you information for a similar year.")
+                            note = "Note: " + " ".join(note_parts)
+                            
+                            result_with_note = {"data": result["data"], "found": True, "note": note}
+                            # Pass all_systems parameter here too
+                            response = format_calibration_info(result_with_note, vehicle_info_to_use.get('component'), collision_area, all_systems=all_systems, requested_year=year)
+                            send_response(response, is_markdown=False)
                             return
                     
-                    # If still not found, send a fallback message
-                    send_response(f"I couldn't find detailed calibration information for the {year if year else ''} {make} {model} in my database. Please try another vehicle or ask a more general question.")
+                    # Add a note about assumed information to the fallback response
+                    if assumed_info:
+                        missing_info.append("_assumed_info")  # Special flag for provide_vehicle_info
+                    
+                    # Call provide_vehicle_info with missing and assumed info
+                    # Pass the original user message to help with web-based information retrieval
+                    response = provide_vehicle_info(make, model, year, query_type, wants_table, table_format, 
+                                                   missing_info=missing_info, assumed_info=assumed_info, user_message=user_message)
+                    send_response(response)
                     return
-        else:
-            # Extract vehicle information from the user's message
-            current_vehicle_info = extract_vehicle_info(user_message)
-            print(f"DEBUG: Extracted vehicle info from current message: {current_vehicle_info}")
-            
-            # Check if we have vehicle info in this message
-            has_vehicle_in_message = bool(current_vehicle_info['make'] or current_vehicle_info['model'] or current_vehicle_info['year'])
-            
-            # If we found vehicle info in this message, update context and chat name
-            if has_vehicle_in_message:
-                # Update the stored vehicle context - using all non-empty fields
-                if last_vehicle_info[session_id]:
-                    # Merge with existing vehicle info, preserving previous values if new ones are empty
-                    merged_info = {
-                        'year': current_vehicle_info['year'] or last_vehicle_info[session_id].get('year'),
-                        'make': current_vehicle_info['make'] or last_vehicle_info[session_id].get('make'),
-                        'model': current_vehicle_info['model'] or last_vehicle_info[session_id].get('model'),
-                        'component': current_vehicle_info['component'] or last_vehicle_info[session_id].get('component')
-                    }
-                    last_vehicle_info[session_id] = merged_info
-                    print(f"DEBUG: Merged vehicle context to: {merged_info}")
-                else:
-                    # Just use the new info if we don't have any previous context
-                    last_vehicle_info[session_id] = current_vehicle_info
-                    print(f"DEBUG: Set new vehicle context to: {current_vehicle_info}")
+            else:
+                # No make or model, call provide_vehicle_info with missing and assumed info
+                # Pass the original user message to help with web-based information retrieval
+                response = provide_vehicle_info(make, model, year, query_type, wants_table, table_format, 
+                                               missing_info=missing_info, assumed_info=assumed_info, user_message=user_message)
+                send_response(response)
+                return
         
         # Get recent conversation for context (last 5 messages)
         recent_msgs = conversation_history[session_id][-5:] if conversation_history[session_id] else []
@@ -1258,7 +1491,7 @@ def handle_message(data):
             'links for this vehicle', 'information links'
         ])
         
-        if service_info_request:
+        if service_info_request and (has_vehicle_in_message or last_vehicle_info[session_id]):
             print(f"DEBUG: Detected service info request: '{user_message}'")
             
             # First check if there's a vehicle in the current message
@@ -1286,7 +1519,6 @@ def handle_message(data):
                 send_response("I need to know which vehicle you're asking about. Please mention the make, model, and ideally the year of the vehicle you need service information for.")
                 return
                 
-            # DIRECT DATABASE SEARCH WITHOUT HARDCODED FALLBACKS
             # Get actual links from the database
             service_links = get_vehicle_service_links(make, model, year)
             
@@ -1377,23 +1609,25 @@ def handle_message(data):
                 
                 # Add manufacturer-specific information based on the ACTUAL vehicle make
                 response += "### Manufacturer Service Portals\n\n"
-                if make.lower() in ['nissan', 'infiniti', 'datsun']:
+                make_lower = make.lower() if make else ""
+                
+                if make_lower in ['nissan', 'infiniti', 'datsun']:
                     response += "* <a href='https://www.nissan-techinfo.com/' target='_blank'>Nissan/Infiniti Technical Information Portal</a>\n"
                     response += "* <a href='https://www.nissan-techinfo.com/nissan/controller.aspx?type=com.nissan.sbs.ui.rich.staticContent.StaticContentAction&id=start&region=nissan&mkt=NANADS' target='_blank'>Nissan/Infiniti ADAS Calibration Information</a>\n"
                 
-                elif make.lower() in ['toyota', 'lexus', 'scion']:
+                elif make_lower in ['toyota', 'lexus', 'scion']:
                     response += "* <a href='https://techinfo.toyota.com/' target='_blank'>Toyota/Lexus Technical Information</a>\n"
                     response += "* <a href='https://techinfo.toyota.com/techInfoPortal/appmanager/t3/ti' target='_blank'>Toyota/Lexus Repair Procedures</a>\n"
                 
-                elif make.lower() in ['honda', 'acura']:
+                elif make_lower in ['honda', 'acura']:
                     response += "* <a href='https://techinfo.honda.com/' target='_blank'>Honda/Acura Service Information</a>\n"
                     response += "* <a href='https://techinfo.honda.com/rjanisis/logon.aspx' target='_blank'>Honda/Acura ADAS Specifications</a>\n"
                 
-                elif make.lower() in ['ford', 'lincoln', 'mercury']:
+                elif make_lower in ['ford', 'lincoln', 'mercury']:
                     response += "* <a href='https://www.motorcraftservice.com/' target='_blank'>Ford/Lincoln/Mercury Service Information</a>\n"
                     response += "* <a href='https://www.fordtechservice.dealerconnection.com/' target='_blank'>Ford Professional Technician Society</a>\n"
                 
-                elif make.lower() in ['chevrolet', 'gmc', 'buick', 'cadillac', 'gm']:
+                elif make_lower in ['chevrolet', 'gmc', 'buick', 'cadillac', 'gm']:
                     response += "* <a href='https://www.acdelcotechconnect.com/' target='_blank'>GM Service Information</a>\n"
                     response += "* <a href='https://www.acdelcotds.com/' target='_blank'>GM Technical Delivery System</a>\n"
                 
@@ -1422,10 +1656,11 @@ def handle_message(data):
         adas_request = any(phrase in user_message.lower() for phrase in [
             'adas systems', 'what systems', 'what adas', 'what features',
             'safety systems', 'driver assistance', 'what does it have',
-            'all systems', 'show me the systems', 'does it have'
+            'all systems', 'show me the systems', 'does it have',
+            'calibration', 'need for', 'requirements'
         ])
         
-        if adas_request:
+        if adas_request and (has_vehicle_in_message or last_vehicle_info[session_id]):
             # Similar logic to use current or stored vehicle context
             vehicle_info_to_use = current_vehicle_info
             
@@ -1443,7 +1678,9 @@ def handle_message(data):
                 
                 if result["found"]:
                     # Format response with calibration info
-                    response = format_calibration_info(result["data"], last_vehicle_info[session_id].get('component'))
+                    # Get all_systems from vehicle_info_to_use if available
+                    all_systems = vehicle_info_to_use.get('all_systems', [])
+                    response = format_calibration_info(result["data"], vehicle_info_to_use.get('component'), collision_area, all_systems=all_systems, requested_year=year)
                     send_response(response, is_markdown=False)  # Send as HTML for better formatting
                     return
                 else:
@@ -1452,7 +1689,11 @@ def handle_message(data):
                         print(f"DEBUG: Trying ADAS request again without year constraint for {make} {model}")
                         result = query_vehicle_database(make, model, None)
                         if result["found"]:
-                            response = format_calibration_info(result["data"], last_vehicle_info[session_id].get('component'))
+                            note = f"Note: I couldn't find specific information for a {year} {make} {model}, so I'm showing you information for a similar year."
+                            result_with_note = {"data": result["data"], "found": True, "note": note}
+                            # Get all_systems from vehicle_info_to_use if available
+                            all_systems = vehicle_info_to_use.get('all_systems', [])
+                            response = format_calibration_info(result_with_note, vehicle_info_to_use.get('component'), collision_area, all_systems=all_systems, requested_year=year)
                             send_response(response, is_markdown=False)
                             return
                     
@@ -1506,76 +1747,16 @@ How can I assist you today?"""
             send_response(intro_message)
             return
         
-        # Process generic ADAS queries
-        if is_adas_query(user_message):
-            # If we have a vehicle in the message or in context, prioritize that
-            if has_vehicle_in_message or last_vehicle_info[session_id]:
-                # Use current vehicle info or fall back to stored
-                vehicle_info_to_use = current_vehicle_info if has_vehicle_in_message else last_vehicle_info[session_id]
-                
-                make = vehicle_info_to_use.get('make', '')
-                model = vehicle_info_to_use.get('model', '')
-                year = vehicle_info_to_use.get('year', '')
-                
-                # Try database first
-                result = query_vehicle_database(make, model, year)
-                
-                if result["found"]:
-                    response = handle_vehicle_info_query(user_message)
-                    send_response(response)
-                    return
-                else:
-                    # Use fallback
-                    wants_table = 'table' in user_message.lower()
-                    response = provide_vehicle_info(make, model, year, "general", wants_table)
-                    send_response(response)
-                    return
-            
-            # Use Gemini for more general ADAS queries
-            if HAS_GEMINI_ACCESS and 'model' in globals() and globals()['model'] is not None:
-                gemini_model = globals()['model']
-                try:
-                    # Include context information about any previously mentioned vehicle
-                    vehicle_context = ""
-                    if last_vehicle_info[session_id]:
-                        v_info = last_vehicle_info[session_id]
-                        v_parts = []
-                        if v_info.get('year'):
-                            v_parts.append(v_info.get('year'))
-                        if v_info.get('make'):
-                            v_parts.append(v_info.get('make'))
-                        if v_info.get('model'):
-                            v_parts.append(v_info.get('model'))
-                        
-                        if v_parts:
-                            vehicle_context = f"The user previously mentioned a {' '.join(v_parts)}. Consider this context in your response."
-                    
-                    prompt = f"""
-                    You are Nicc AI, an expert in automotive ADAS systems and calibration.
-                    
-                    Previous conversation:
-                    {context_text}
-                    
-                    {vehicle_context}
-                    
-                    User Question: "{user_message}"
-                    
-                    Provide a helpful, expert-level response about ADAS systems, focusing on accuracy.
-                    """
-                    
-                    response = generate_content_with_retry(gemini_model, [prompt])
-                    send_response(response.text)
-                    return
-                except Exception as e:
-                    print(f"Error with Gemini for ADAS query: {str(e)}")
+        # For generic questions, use Gemini API if available, even if we have vehicle context
+        # New approach: For non-vehicle questions, don't try to force the vehicle context
         
-        # For all other queries, use Gemini for general response
+        # Use Gemini for general response
         if HAS_GEMINI_ACCESS and 'model' in globals() and globals()['model'] is not None:
             gemini_model = globals()['model']
             try:
-                # Include vehicle context here too
-                vehicle_context = ""
-                if last_vehicle_info[session_id]:
+                # Include vehicle context only if this appears to be a vehicle-related question
+                vehicle_context_str = ""
+                if is_vehicle_question and last_vehicle_info[session_id]:
                     v_info = last_vehicle_info[session_id]
                     v_parts = []
                     if v_info.get('year'):
@@ -1586,7 +1767,7 @@ How can I assist you today?"""
                         v_parts.append(v_info.get('model'))
                     
                     if v_parts:
-                        vehicle_context = f"The user previously mentioned a {' '.join(v_parts)}. If this is relevant, consider it in your response."
+                        vehicle_context_str = f"The user previously mentioned a {' '.join(v_parts)}. If this is relevant, consider it in your response."
                 
                 prompt = f"""
                 You are Nicc AI, a helpful assistant primarily focused on automotive ADAS systems,
@@ -1595,7 +1776,7 @@ How can I assist you today?"""
                 Previous conversation:
                 {context_text}
                 
-                {vehicle_context}
+                {vehicle_context_str}
                 
                 User Question: "{user_message}"
                 
@@ -1603,18 +1784,41 @@ How can I assist you today?"""
                 """
                 
                 response = generate_content_with_retry(gemini_model, [prompt])
-                send_response(response.text)
-                return
+                return send_response(response.text)
             except Exception as e:
                 print(f"Error with general Gemini response: {str(e)}")
+                # Don't return here - fall through to fallback response
         
         # Fallback response if all else fails
-        fallback = """I'm here to help with automotive ADAS systems and calibration. Please provide specific vehicle details (year, make, model) for the most accurate information."""
+        fallback = """I'm here to help with automotive ADAS systems and calibration. Please provide specific vehicle details (year, make, model) for the most accurate information. For general questions, I'll do my best to assist with any topic."""
         send_response(fallback)
-        
     except Exception as e:
         print(f"Error in handle_message: {str(e)}")
-        socketio.emit('error', {'message': 'An error occurred processing your message'}, room=session_id)
+        traceback.print_exc()  # Print the full error traceback for debugging
+        try:
+            # Attempt to send an error response to the client
+            socketio.emit('error', {'message': 'An error occurred processing your message'}, room=session_id)
+            
+            # Also try to send a friendly response message
+            fallback_msg = "I'm sorry, I encountered an error processing your request. Please try again or ask a different question."
+            socketio.emit('response', {
+                'message': fallback_msg,
+                'isMarkdown': True,
+                'isHTML': False
+            }, room=session_id)
+            
+            # Try to save the error response in history
+            if 'conversation_history' in locals() and session_id in conversation_history:
+                conversation_history[session_id].append({
+                    'role': 'assistant',
+                    'message': fallback_msg
+                })
+                
+                # Save to database if we have a chat_id
+                if 'chat_id' in locals() and chat_id:
+                    save_message(chat_id, 'assistant', fallback_msg)
+        except Exception as inner_e:
+            print(f"Error sending error response: {str(inner_e)}")
 
 @app.route('/api/chats', methods=['GET'])
 def get_chats_api():
@@ -1686,10 +1890,13 @@ def get_chat_api(chat_id):
         # Get chat messages
         messages = get_chat_messages(chat_id)
         
+        # Log for debugging purposes
+        print(f"DEBUG: Retrieved {len(messages)} messages for chat {chat_id}")
+        
         return jsonify({'success': True, 'messages': messages})
     except Exception as e:
         print(f"Error getting chat: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': str(e), 'messages': []})
 
 @app.route('/api/chats/<chat_id>/rename', methods=['POST'])
 def rename_chat_api(chat_id):
@@ -1970,105 +2177,251 @@ def get_vehicle_service_links(make, model, year=None):
         traceback.print_exc()
         return None
 
-def provide_vehicle_info(make, model, year=None, query_type="general", wants_table=False, table_format=None):
-    """Generate information about vehicle ADAS systems when database info is not available"""
-    # This function creates a fallback response when we don't have exact data for a vehicle
+def extract_key_topics(message):
+    """Extract key topics from the user's message."""
+    # Patterns for common ADAS and calibration questions
+    radar_pattern = re.compile(r'(front|rear|side)?\s*(radar|sensing|detection)', re.IGNORECASE)
+    camera_pattern = re.compile(r'(front|rear|side|backup)?\s*(camera|vision|sensing|detection)', re.IGNORECASE)
+    sensor_pattern = re.compile(r'(parking|proximity|distance|ultrasonic)?\s*(sensor|sensing|detection)', re.IGNORECASE)
+    lidar_pattern = re.compile(r'(lidar|laser|scanning)', re.IGNORECASE)
+    adas_pattern = re.compile(r'(ADAS|advanced driver assistance|driver assist|assistance system)', re.IGNORECASE)
+    calibration_pattern = re.compile(r'(calibration|calibrate|align|adjustment|reset)', re.IGNORECASE)
+    collision_pattern = re.compile(r'(collision|accident|crash|impact|hit|damage)', re.IGNORECASE)
+    repair_pattern = re.compile(r'(repair|fix|restore|replace)', re.IGNORECASE)
     
-    # Format vehicle display string
-    make_display = make if make else "Unknown Make"
-    model_display = model if model else "Unknown Model"
+    # Patterns for specific repair scenarios
+    bumper_pattern = re.compile(r'(bumper|fascia)\s*(remov|replac|repair|install|off|disconnect)', re.IGNORECASE)
+    windshield_pattern = re.compile(r'(windshield|glass|window|windscreen)\s*(remov|replac|repair|install|crack|broken)', re.IGNORECASE)
+    parts_pattern = re.compile(r'(remov|replac|repair|install|disconnect|take off)\s*(\w+)', re.IGNORECASE)
     
-    # Format year to remove decimal if present
-    if year:
-        try:
-            if isinstance(year, str) and '.' in year:
-                year = year.split('.')[0]
-            elif isinstance(year, (int, float)):
-                year = str(int(year))
-        except (ValueError, TypeError):
-            pass  # Keep original if conversion fails
+    topics = []
     
-    year_display = year if year else ""
+    # Check for matches
+    if radar_pattern.search(message):
+        match = radar_pattern.search(message)
+        location = match.group(1) if match.group(1) else ""
+        topics.append(f"{location} radar".strip())
     
-    vehicle_display = f"{year_display} {make_display} {model_display}".strip()
+    if camera_pattern.search(message):
+        match = camera_pattern.search(message)
+        location = match.group(1) if match.group(1) else ""
+        topics.append(f"{location} camera".strip())
     
-    # Handle different query types
-    if query_type == "years":
-        return f"I don't have specific production information about the {make_display} {model_display} in my database. Please check manufacturer resources for accurate information about production years."
+    if sensor_pattern.search(message):
+        match = sensor_pattern.search(message)
+        sensor_type = match.group(1) if match.group(1) else ""
+        topics.append(f"{sensor_type} sensor".strip())
     
-    # Basic response when we don't have detailed information
-    response = f"# {vehicle_display} Information\n\n"
-    response += "I don't have specific ADAS calibration data for this vehicle in my database. "
-    response += "Here's some general information about common ADAS systems:\n\n"
+    if lidar_pattern.search(message):
+        topics.append("lidar")
     
-    # Add common ADAS systems by manufacturer when possible
-    if make:
-        make_lower = make.lower()
-        if make_lower in ['honda', 'acura']:
-            response += "## Honda/Acura ADAS Systems\n\n"
-            response += "Honda and Acura vehicles commonly use the Honda Sensing or AcuraWatch suite of technologies, which typically include:\n\n"
-            response += "- Collision Mitigation Braking System (CMBS)\n"
-            response += "- Road Departure Mitigation (RDM)\n"
-            response += "- Adaptive Cruise Control (ACC)\n"
-            response += "- Lane Keeping Assist System (LKAS)\n"
-            response += "- Forward Collision Warning (FCW)\n"
-            response += "- Lane Departure Warning (LDW)\n\n"
-            response += "These systems typically require static calibration procedures for the windshield-mounted camera after windshield replacement or related repairs."
+    if adas_pattern.search(message):
+        topics.append("ADAS systems")
+    
+    if calibration_pattern.search(message):
+        topics.append("calibration requirements")
+    
+    if collision_pattern.search(message):
+        topics.append("collision repair")
+    
+    if repair_pattern.search(message):
+        topics.append("repair procedures")
+        
+    # Check for specific repair scenarios
+    if bumper_pattern.search(message):
+        match = bumper_pattern.search(message)
+        action = match.group(2) if match.group(2) else "removal"
+        topics.append(f"bumper {action}")
+        
+    if windshield_pattern.search(message):
+        match = windshield_pattern.search(message)
+        action = match.group(2) if match.group(2) else "replacement"
+        topics.append(f"windshield {action}")
+    
+    # Check for other part replacements/removals
+    if parts_pattern.search(message):
+        match = parts_pattern.search(message)
+        action = match.group(1)
+        part = match.group(2)
+        # Only add if the part is not already covered and is not a common word
+        common_words = ['a', 'the', 'if', 'when', 'do', 'i', 'need', 'should', 'it', 'is', 'to', 'will']
+        if part.lower() not in common_words and not any(part.lower() in topic.lower() for topic in topics):
+            topics.append(f"{part} {action}")
+    
+    # If no specific topics found, use a default or try to extract nouns
+    if not topics:
+        if HAS_SPACY and nlp:
+            # Use spaCy to extract nouns as potential topics
+            doc = nlp(message)
+            nouns = [token.text for token in doc if token.pos_ == "NOUN"]
             
-        elif make_lower in ['toyota', 'lexus']:
-            response += "## Toyota/Lexus ADAS Systems\n\n"
-            response += "Toyota and Lexus vehicles commonly use Toyota Safety Sense (TSS) or Lexus Safety System+, which typically include:\n\n"
-            response += "- Pre-Collision System (PCS)\n"
-            response += "- Lane Departure Alert (LDA)\n"
-            response += "- Dynamic Radar Cruise Control (DRCC)\n"
-            response += "- Automatic High Beams (AHB)\n"
-            response += "- Road Sign Assist (RSA)\n\n"
-            response += "Many Toyota/Lexus vehicles require both static and dynamic calibrations after component replacement or related repairs."
-            
-        elif make_lower in ['nissan', 'infiniti']:
-            response += "## Nissan/Infiniti ADAS Systems\n\n"
-            response += "Nissan and Infiniti vehicles commonly feature Safety Shield 360 or Infiniti Safety Shield technologies, which typically include:\n\n"
-            response += "- Automatic Emergency Braking with Pedestrian Detection\n"
-            response += "- Blind Spot Warning (BSW)\n"
-            response += "- Rear Cross Traffic Alert (RCTA)\n"
-            response += "- Lane Departure Warning (LDW)\n"
-            response += "- Intelligent Around View Monitor\n\n"
-            response += "Nissan/Infiniti vehicles often require specialized target-based calibrations after component replacement or related repairs."
+            if nouns:
+                topics = nouns[:3]  # Take up to 3 nouns
+            else:
+                topics = ["ADAS systems", "calibration requirements"]
+        else:
+            # Simple fallback when spaCy is not available
+            # Use regex to find common automotive nouns
+            auto_nouns = re.findall(r'\b(radar|camera|sensor|system|vehicle|car|calibration|repair|bumper|windshield|front|rear|side)\b', 
+                                  message.lower())
+            if auto_nouns:
+                topics = list(set(auto_nouns))[:3]  # Take up to 3 unique nouns
+            else:
+                topics = ["ADAS systems", "calibration requirements"]
     
-    # Add recommendation to consult OEM procedures
-    response += "\n## Important Note\n\n"
-    response += "Always consult manufacturer-specific procedures and requirements for accurate calibration information. "
-    response += "ADAS calibration requirements can vary significantly between model years and trim levels even within the same model line."
-    
-    # Add service information links
-    response += "\n\n## Service Information Links\n\n"
-    
-    # Add manufacturer-specific links based on the make
-    if make_lower in ['nissan', 'infiniti', 'datsun']:
-        response += "* <a href='https://www.nissan-techinfo.com/' target='_blank'>Nissan/Infiniti Technical Information Portal</a>\n"
-        response += "* <a href='https://www.nissan-techinfo.com/nissan/controller.aspx?type=com.nissan.sbs.ui.rich.staticContent.StaticContentAction&id=start&region=nissan&mkt=NANADS' target='_blank'>Nissan/Infiniti ADAS Information</a>\n"
-    
-    elif make_lower in ['toyota', 'lexus', 'scion']:
-        response += "* <a href='https://techinfo.toyota.com/' target='_blank'>Toyota/Lexus Technical Information</a>\n"
-        response += "* <a href='https://techinfo.toyota.com/techInfoPortal/appmanager/t3/ti' target='_blank'>Toyota/Lexus Repair Procedures</a>\n"
-    
-    elif make_lower in ['honda', 'acura']:
-        response += "* <a href='https://techinfo.honda.com/' target='_blank'>Honda/Acura Service Information</a>\n"
-        response += "* <a href='https://techinfo.honda.com/rjanisis/logon.aspx' target='_blank'>Honda/Acura ADAS Specifications</a>\n"
-    
+    # Format topics for prompt
+    if len(topics) == 1:
+        return topics[0]
+    elif len(topics) == 2:
+        return f"{topics[0]} and {topics[1]}"
     else:
-        # For any other make, provide general resources
-        response += "* <a href='https://www.alldata.com/' target='_blank'>ALLDATA Repair Information</a>\n"
-        response += "* <a href='https://www.mitchellsupport.com/' target='_blank'>Mitchell Repair Information</a>\n"
-        response += "* <a href='https://www.i-car.com/' target='_blank'>I-CAR Repair Procedures</a>\n"
+        return f"{', '.join(topics[:-1])}, and {topics[-1]}"
+
+def get_web_information(prompt):
+    """Use Gemini to get web-based information."""
+    try:
+        print(f"DEBUG: Fetching web information with prompt: {prompt}")
+        
+        # Check if we have access to Gemini and the model is initialized
+        if not HAS_GEMINI_ACCESS or not 'model' in globals() or globals()['model'] is None:
+            print("DEBUG: Gemini API not available, using fallback response")
+            return "I'm sorry, I couldn't retrieve detailed information at this time. Please provide more specific vehicle details for a better response."
+        
+        # Create a more focused prompt that emphasizes direct answers to the specific question
+        focused_prompt = f"""You are NICC, a specialized assistant for automotive collision centers.
+
+Answer the following specific question DIRECTLY and CONCISELY:
+
+"{prompt}"
+
+Your response should:
+1. Start with a clear yes/no answer if applicable
+2. Only include information directly relevant to the specific question
+3. Be brief and to the point (3-5 sentences maximum for the core answer)
+4. Mention specific calibration requirements ONLY if directly related to the scenario described
+5. Avoid general information about ADAS systems unless specifically requested
+
+If the question is about a specific scenario (like bumper removal, windshield replacement, etc.), focus ONLY on that specific scenario.
+"""
+        
+        # Use the initialized Gemini model to generate content
+        try:
+            # Try with the global model first (preferred method)
+            gemini_model = globals()['model']
+            response = generate_content_with_retry(gemini_model, [focused_prompt])
+            
+            # Clean up and format the response
+            web_info = response.text
+            
+            # Ensure the response is clean and well-formatted
+            web_info = re.sub(r'\n{3,}', '\n\n', web_info)  # Remove excessive newlines
+            
+            return web_info
+            
+        except Exception as model_error:
+            print(f"DEBUG: Error with global model: {str(model_error)}")
+            
+            # Fallback to direct API call if the global model fails
+            try:
+                # Create a new model instance directly
+                direct_model = genai.GenerativeModel('gemini-1.5-pro')
+                response = direct_model.generate_content([focused_prompt])
+                
+                # Clean up and format the response
+                web_info = response.text
+                
+                # Ensure the response is clean and well-formatted
+                web_info = re.sub(r'\n{3,}', '\n\n', web_info)  # Remove excessive newlines
+                
+                return web_info
+            except Exception as direct_error:
+                print(f"DEBUG: Error with direct model: {str(direct_error)}")
+                return "I'm sorry, I couldn't retrieve the information you requested. Please try again with more specific details about your vehicle."
     
-    # Always add general ADAS resources
-    response += "\n## General ADAS Calibration Resources\n\n"
-    response += "* <a href='https://www.i-car.com/s/repairability-technical-support' target='_blank'>I-CAR Repairability Technical Support Portal</a>\n"
-    response += "* <a href='https://www.hunter.com/adas' target='_blank'>Hunter Engineering ADAS Resources</a>\n"
-    response += "* <a href='https://www.autel.com/adas/' target='_blank'>Autel ADAS Calibration Information</a>\n"
+    except Exception as e:
+        print(f"ERROR in get_web_information: {str(e)}")
+        return "I'm sorry, I couldn't retrieve the information you requested. Please try again with more specific details about your vehicle."
+
+def provide_vehicle_info(make=None, model=None, year=None, query_type="general", wants_table=False, table_format=None, missing_info=None, assumed_info=None, user_message=None):
+    """Provide vehicle information, checking for missing fields and using Gemini for web information when needed."""
+    if not missing_info:
+        missing_info = []
     
-    return response
+    if not assumed_info:
+        assumed_info = []
+    
+    # Determine what information is available and what's missing
+    has_make = make is not None and make != ""
+    has_model = model is not None and model != ""
+    has_year = year is not None and year != ""
+    
+    # Variable to track if we should fetch information from the web
+    fetch_from_web = False
+    web_prompt = ""
+    
+    response_parts = []
+    
+    # Extract the actual question from the user's message to focus the response
+    actual_question = user_message if user_message else ""
+    
+    # Special case for production years query when make and model are known
+    if query_type == "years" and has_make and has_model:
+        fetch_from_web = True
+        web_prompt = f"What are the production years for {make} {model}? Provide a concise answer with the range of years this vehicle was manufactured."
+    
+    # Check for missing information
+    elif "_assumed_info" in missing_info or not (has_make and has_model and has_year):
+        # Only add missing information notice if there's no specific question to answer
+        if not any(term in actual_question.lower() for term in ['calibrate', 'calibration', 'remove', 'bumper', 'windshield', 'replace']):
+            response_parts.append("I notice some vehicle information is missing. ")
+            
+            if not has_make and "make" in missing_info:
+                response_parts.append("Please select the vehicle make. ")
+            
+            if not has_model and "model" in missing_info:
+                response_parts.append("Please select the vehicle model. ")
+                
+            if not has_year and "year" in missing_info:
+                response_parts.append("Please select the vehicle year. ")
+        
+        # Add note about assumed information - only if relevant to the answer
+        if assumed_info and "_assumed_info" in missing_info:
+            response_parts.append(f"\n\nNote: I'm using the {', '.join(assumed_info)} from your previous query, as you didn't specify this in your current question. ")
+        
+        # Decide whether to fetch web information based on what we have
+        if has_make and user_message:
+            # We have at least the make, try to get specific information for the question
+            fetch_from_web = True
+            
+            # Extract key topics from the user's question
+            topics = extract_key_topics(user_message)
+            
+            if has_model:
+                web_prompt = f"{actual_question} (For {make} {model})"
+            else:
+                web_prompt = f"{actual_question} (For {make} vehicles)"
+    
+    # Fetch information from the web if needed
+    if fetch_from_web:
+        if not response_parts:
+            # If we haven't added any context yet, create a direct response
+            web_info = get_web_information(web_prompt)
+            response_parts.append(web_info)
+        else:
+            # If we've already added context, provide additional information
+            response_parts.append("\n\nHere's what I can tell you: ")
+            web_info = get_web_information(web_prompt)
+            response_parts.append(web_info)
+        
+        # Only add the information source note if we provided general information
+        if "production year" in web_prompt.lower() or not (has_make and has_model and has_year):
+            response_parts.append("\n\nFor the most accurate information specific to your exact vehicle configuration, please provide complete vehicle details or consult the manufacturer's documentation.")
+    
+    # Default response if we don't have enough info to fetch from web
+    if not fetch_from_web and not response_parts:
+        response_parts.append("I need more information about your vehicle to assist you properly. Please select the make, model, and year using the dropdown menus above.")
+    
+    return "".join(response_parts)
 
 @app.route('/api/vehicle-data', methods=['GET'])
 def get_vehicle_data_api():
@@ -2595,6 +2948,183 @@ def get_vehicle_context_str(vehicle_context):
             context_parts.append(f"Points of Impact: {' | '.join(poi_area_strs)}")
     
     return "\n".join(context_parts)
+
+@app.route('/api/nhtsa-adas', methods=['POST'])
+def get_nhtsa_adas_api():
+    """API endpoint to get NHTSA ADAS compliance data for a VIN"""
+    try:
+        # Get the VIN from the request
+        data = request.json
+        vin = data.get('vin')
+        year = data.get('year', '')  # Optional year parameter
+        
+        if not vin or len(vin) != 17:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid VIN. Please provide a 17-character VIN.'
+            }), 400
+        
+        # Basic VIN validation
+        if not re.match(r'^[A-HJ-NPR-Z0-9]{17}$', vin):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid VIN format. VINs contain 17 alphanumeric characters (excluding I, O, Q).'
+            }), 400
+        
+        # NHTSA API call for extended VIN data
+        try:
+            base_url = "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended"
+            
+            if year:
+                url = f"{base_url}/{vin}?format=json&modelyear={year}"
+            else:
+                url = f"{base_url}/{vin}?format=json"
+            
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            
+            nhtsa_data = response.json()
+            
+            if response.status_code == 200 and nhtsa_data.get('Results'):
+                result = nhtsa_data['Results'][0]
+                
+                # Check for errors in the response
+                error_code = result.get('ErrorCode', '')
+                if error_code and error_code != '0':
+                    error_text = result.get('ErrorText', 'Unknown error occurred')
+                    return jsonify({
+                        'success': False,
+                        'error': f"NHTSA API Error: {error_text}"
+                    }), 400
+                
+                # Extract ADAS features
+                adas_features = []
+                
+                # ADAS feature fields mapping
+                adas_field_mapping = [
+                    ('Adaptive Cruise Control (ACC)', 'AdaptiveCruiseControl'),
+                    ('Anti-lock Braking System (ABS)', 'ABS'),
+                    ('Crash Imminent Braking (CIB)', 'CrashImminentBrakingCIB'),
+                    ('Blind Spot Warning (BSW)', 'BlindSpotMon'),
+                    ('Electronic Stability Control (ESC)', 'ESC'),
+                    ('Traction Control', 'TractionControl'),
+                    ('Forward Collision Warning (FCW)', 'ForwardCollisionWarning'),
+                    ('Lane Departure Warning (LDW)', 'LaneDepartureWarning'),
+                    ('Lane Keeping Assistance (LKA)', 'LaneKeepSystem'),
+                    ('Backup Camera (BUC)', 'BackupCamera'),
+                    ('Parking Assist (APA)', 'ParkingAssist'),
+                    ('Dynamic Brake Support (DBS)', 'DynamicBrakeSupport'),
+                    ('Pedestrian Automatic Emergency Braking (PAEB)', 'PedestrianAutomaticEmergencyBraking'),
+                    ('Blind Spot Intervention (BSI)', 'BlindSpotInterventionBSI'),
+                    ('Lane Centering Assistance', 'LaneCenteringAssistance'),
+                    ('Rear Cross Traffic Alert', 'RearCrossTrafficAlert'),
+                    ('Rear Automatic Emergency Braking (AEB)', 'RearAutomaticEmergencyBraking'),
+                    ('Automatic Emergency Braking (AEB)', 'AutomaticEmergencyBraking'),
+                    ('Night Vision (NV)', 'NightVision'),
+                    ('Adaptive Headlights (AHL)', 'AdaptiveHeadlights'),
+                    ('Semi-automatic Headlamp Beam Switching', 'SemiautomaticHeadlampBeamSwitching'),
+                    ('Surround View Camera (SVC)', 'SurroundViewCamera'),
+                    ('Lane Watch (Honda)', 'LaneWatch'),
+                    ('Auto Park Assist', 'AutoParkAssist'),
+                    ('Collision Avoidance', 'CollisionAvoidance'),
+                    ('Driver Attention Monitor', 'DriverAttentionMonitor'),
+                    ('Traffic Sign Recognition', 'TrafficSignRecognition')
+                ]
+                
+                for display_name, field_name in adas_field_mapping:
+                    value = result.get(field_name, '')
+                    if value and value.lower() not in ['not available', '', 'no', 'not applicable', 'n/a']:
+                        adas_features.append({
+                            'name': display_name,
+                            'value': value,
+                            'field': field_name
+                        })
+                
+                # Extract passive safety features
+                passive_features = []
+                passive_field_mapping = [
+                    ('Front Air Bag Locations', 'AirBagLocFront'),
+                    ('Side Air Bag Locations', 'AirBagLocSide'),
+                    ('Curtain Air Bag Locations', 'AirBagLocCurtain'),
+                    ('Knee Air Bag Locations', 'AirBagLocKnee'),
+                    ('Seat Cushion Air Bag Locations', 'SeatCushionAirBagLocations'),
+                    ('Seat Belt Type', 'SeatBeltsAll'),
+                    ('Pretensioner', 'Pretensioner')
+                ]
+                
+                for display_name, field_name in passive_field_mapping:
+                    value = result.get(field_name, '')
+                    if value and value.lower() not in ['not available', '', 'no', 'not applicable', 'n/a']:
+                        passive_features.append({
+                            'name': display_name,
+                            'value': value,
+                            'field': field_name
+                        })
+                
+                # Extract other safety features
+                other_features = []
+                other_field_mapping = [
+                    ('Tire Pressure Monitoring System (TPMS)', 'TirePressureMonitoringSystemTPMSType'),
+                    ('Daytime Running Light (DRL)', 'DaytimeRunningLightDRL'),
+                    ('Headlamp Light Source', 'HeadlampLightSource'),
+                    ('Adaptive Driving Beam (ADB)', 'AdaptiveDrivingBeamADB'),
+                    ('Auto-Reverse System for Windows', 'AutoReverseSystemforWindowsandSunroofs'),
+                    ('Keyless Ignition', 'KeylessIgnition'),
+                    ('Event Data Recorder (EDR)', 'EventDataRecorderEDR'),
+                    ('SAE Automation Level From', 'SAEAutomationLevelFrom'),
+                    ('SAE Automation Level To', 'SAEAutomationLevelTo')
+                ]
+                
+                for display_name, field_name in other_field_mapping:
+                    value = result.get(field_name, '')
+                    if value and value.lower() not in ['not available', '', 'no', 'not applicable', 'n/a']:
+                        other_features.append({
+                            'name': display_name,
+                            'value': value,
+                            'field': field_name
+                        })
+                
+                # Get basic vehicle info for context
+                vehicle_info = {
+                    'make': result.get('Make', ''),
+                    'model': result.get('Model', ''),
+                    'year': result.get('ModelYear', ''),
+                    'trim': result.get('Trim', ''),
+                    'body_class': result.get('BodyClass', '')
+                }
+                
+                return jsonify({
+                    'success': True,
+                    'vehicle_info': vehicle_info,
+                    'adas_features': adas_features,
+                    'passive_features': passive_features,
+                    'other_features': other_features,
+                    'total_features': len(adas_features) + len(passive_features) + len(other_features),
+                    'data_source': 'NHTSA vPIC API'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'No data found for this VIN in NHTSA database'
+                }), 404
+                
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                'success': False,
+                'error': f"Network error accessing NHTSA API: {str(e)}"
+            }), 500
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': f"Error processing NHTSA data: {str(e)}"
+            }), 500
+            
+    except Exception as e:
+        print(f"Error in NHTSA ADAS API: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 # Add this at the end of the file to run the application
 if __name__ == "__main__":

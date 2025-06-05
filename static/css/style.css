@@ -152,16 +152,17 @@ body {
 }
 
 .subtitle {
-    color: var(--text-color);
+    color: #4d9fff; /* Changed to a clear light blue that matches the header gradient */
     font-size: 1.1rem;
     margin-top: -15px; /* Changed from -10px to -15px to move subtitle much closer to title */
-    opacity: 0.8;
-    font-weight: 400;
+    opacity: 1; /* Full opacity for better visibility */
+    font-weight: 500; /* Slightly bolder */
     letter-spacing: 1px;
     animation: fadeIn 1s ease-out;
     max-width: 80%;
     margin-left: auto;
     margin-right: auto;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5); /* Add subtle text shadow for better legibility */
 }
 
 .theme-toggle {
@@ -905,10 +906,10 @@ body {
     opacity: 0.9;
 }
 
-/* Sidebar toggle button */
+/* Move sidebar toggle from top to bottom of header */
 .sidebar-toggle {
     position: absolute;
-    top: 50px;
+    bottom: 10px; /* Changed from top: 50px to bottom: 10px */
     left: 20px;
     background: transparent;
     border: none;
@@ -1363,7 +1364,7 @@ body.light-theme .vehicle-selection-panel {
     color: white;
     text-align: center;
     pointer-events: none;
-    text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.7); /* Increased shadow strength */
 }
 
 .poi-marker.selected .poi-number {
@@ -1383,6 +1384,14 @@ body.light-theme .poi-marker {
 
 body.light-theme .poi-marker:hover {
     background-color: rgba(200, 220, 255, 0.9);
+}
+
+/* Enhanced selected marker styling for light mode */
+body.light-theme .poi-marker.selected {
+    background-color: rgba(255, 50, 50, 1.0); /* Brighter red background */
+    border: 2px solid #000; /* Black border for more contrast */
+    box-shadow: 0 0 5px 2px rgba(255, 0, 0, 0.6); /* Subtle outer red glow */
+    transform: translate(-50%, -50%); /* Keep original size */
 }
 
 body.light-theme .selected-pois {
@@ -1693,4 +1702,303 @@ body.light-theme .browser-notice {
 
 .remove-system-btn:hover {
     background-color: #d32f2f;
+}
+
+/* Enhance highlight effect for updated dropdowns */
+.highlight-updated {
+    animation: highlight-pulse 1.5s ease-in-out;
+    border-color: #449ddb !important;
+    box-shadow: 0 0 0 3px rgba(68, 157, 219, 0.4) !important;
+}
+
+@keyframes highlight-pulse {
+    0% { background-color: transparent; }
+    30% { background-color: rgba(68, 157, 219, 0.4); } 
+    70% { background-color: rgba(68, 157, 219, 0.4); }
+    100% { background-color: transparent; }
+}
+
+/* Add a specific highlight class for model dropdown for extra emphasis */
+#modelSelect.highlight-updated {
+    animation: model-highlight-pulse 2.5s ease-in-out;
+    border-color: #4CAF50 !important;
+    box-shadow: 0 0 6px rgba(76, 175, 80, 0.8) !important;
+    font-weight: bold;
+}
+
+@keyframes model-highlight-pulse {
+    0% { background-color: transparent; }
+    20% { background-color: rgba(76, 175, 80, 0.3); } 
+    40% { background-color: rgba(76, 175, 80, 0.1); }
+    60% { background-color: rgba(76, 175, 80, 0.3); }
+    80% { background-color: rgba(76, 175, 80, 0.1); }
+    100% { background-color: transparent; }
+}
+
+/* Make sure there's appropriate styling for dropdowns */
+.vehicle-select {
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.vehicle-select:focus {
+    border-color: #449ddb;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(68, 157, 219, 0.3);
+}
+
+/* Improve POI number visibility in light mode */
+body.light-theme .poi-number {
+    color: #000; /* Change to black in light mode */
+    text-shadow: 0 0 3px rgba(255, 255, 255, 0.9), 0 0 1px rgba(255, 255, 255, 0.9); /* Add white outline effect */
+    font-weight: 800; /* Make it bolder */
+}
+
+body.light-theme .poi-marker.selected .poi-number {
+    color: #000; /* Keep black color for selected markers in light mode */
+}
+
+/* Improve dropdown option visibility in dark mode */
+.vehicle-select option {
+    background-color: var(--container-bg);
+    color: var(--text-color);
+    padding: 8px;
+    font-size: 14px;
+}
+
+/* Add specific styling for light and dark modes */
+body.light-theme .vehicle-select option {
+    background-color: #ffffff;
+    color: #333333;
+}
+
+body:not(.light-theme) .vehicle-select option {
+    background-color: #2a2a2a;
+    color: #ffffff;
+}
+
+/* Also style the system dropdowns the same way */
+.system-select option {
+    background-color: var(--container-bg);
+    color: var(--text-color);
+    padding: 8px;
+    font-size: 14px;
+}
+
+body.light-theme .system-select option {
+    background-color: #ffffff;
+    color: #333333;
+}
+
+body:not(.light-theme) .system-select option {
+    background-color: #2a2a2a;
+    color: #ffffff;
+}
+
+/* NHTSA ADAS Compliance Styles */
+.nhtsa-button-container {
+    margin-top: 10px;
+    text-align: center;
+}
+
+.nhtsa-toggle-btn {
+    background: linear-gradient(135deg, #4CAF50, #45a049);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.nhtsa-toggle-btn:hover {
+    background: linear-gradient(135deg, #45a049, #3d8b40);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.nhtsa-toggle-btn i {
+    margin-right: 6px;
+}
+
+.nhtsa-adas-display {
+    margin-top: 15px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #f9f9f9;
+    overflow: hidden;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+body:not(.light-theme) .nhtsa-adas-display {
+    background: #2a2a2a;
+    border-color: #444;
+}
+
+.nhtsa-content {
+    padding: 20px;
+}
+
+.nhtsa-loading {
+    text-align: center;
+    color: #666;
+    font-style: italic;
+}
+
+body:not(.light-theme) .nhtsa-loading {
+    color: #ccc;
+}
+
+.nhtsa-loading .loading-indicator {
+    margin-bottom: 10px;
+}
+
+.nhtsa-results {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.nhtsa-vehicle-info {
+    background: #e8f5e8;
+    border: 1px solid #4CAF50;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+body:not(.light-theme) .nhtsa-vehicle-info {
+    background: #1a3d1a;
+    border-color: #4CAF50;
+}
+
+.nhtsa-vehicle-info h3 {
+    margin: 0 0 10px 0;
+    color: #2e7d32;
+    font-size: 16px;
+}
+
+body:not(.light-theme) .nhtsa-vehicle-info h3 {
+    color: #81c784;
+}
+
+.nhtsa-section {
+    margin-bottom: 25px;
+}
+
+.nhtsa-section h4 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 15px;
+    font-weight: 600;
+    border-bottom: 2px solid #4CAF50;
+    padding-bottom: 5px;
+}
+
+body:not(.light-theme) .nhtsa-section h4 {
+    color: #fff;
+}
+
+.nhtsa-feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.nhtsa-feature-item {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+}
+
+body:not(.light-theme) .nhtsa-feature-item {
+    background: #333;
+    border-color: #555;
+}
+
+.nhtsa-feature-item:hover {
+    transform: translateX(5px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.nhtsa-feature-name {
+    font-weight: 600;
+    color: #2e7d32;
+    margin-bottom: 4px;
+}
+
+body:not(.light-theme) .nhtsa-feature-name {
+    color: #81c784;
+}
+
+.nhtsa-feature-value {
+    color: #666;
+    font-size: 14px;
+}
+
+body:not(.light-theme) .nhtsa-feature-value {
+    color: #ccc;
+}
+
+.nhtsa-no-features {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+    padding: 20px;
+}
+
+.nhtsa-error {
+    background: #ffebee;
+    border: 1px solid #f44336;
+    border-radius: 6px;
+    padding: 15px;
+    color: #c62828;
+    text-align: center;
+}
+
+body:not(.light-theme) .nhtsa-error {
+    background: #3d1a1a;
+    border-color: #f44336;
+    color: #ef5350;
+}
+
+.nhtsa-data-source {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #ddd;
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+}
+
+body:not(.light-theme) .nhtsa-data-source {
+    border-color: #555;
+    color: #aaa;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .nhtsa-toggle-btn {
+        font-size: 13px;
+        padding: 6px 12px;
+    }
+    
+    .nhtsa-content {
+        padding: 15px;
+    }
+    
+    .nhtsa-results {
+        max-height: 300px;
+    }
 } 
